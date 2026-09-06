@@ -1,0 +1,173 @@
+<title>GitHub Push Commands for Miruro Plugin</title>
+<style>
+  body {
+    font-family: 'Courier New', monospace;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px;
+    background: #0d1117;
+    color: #c9d1d9;
+  }
+  .command-block {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 16px;
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+  .command {
+    background: #010409;
+    color: #79c0ff;
+    padding: 12px;
+    border-radius: 4px;
+    margin: 8px 0;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .label {
+    color: #8b949e;
+    font-size: 12px;
+    text-transform: uppercase;
+    margin-top: 16px;
+    margin-bottom: 8px;
+    font-weight: bold;
+  }
+  .step {
+    background: #0d1117;
+    border-left: 3px solid #238636;
+    padding: 12px 16px;
+    margin: 12px 0;
+    border-radius: 4px;
+  }
+  .step-title {
+    color: #58a6ff;
+    font-weight: bold;
+    margin-bottom: 8px;
+  }
+  .success {
+    color: #3fb950;
+  }
+  .info {
+    color: #79c0ff;
+  }
+  .warning {
+    color: #d29922;
+  }
+  code {
+    background: #161b22;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #79c0ff;
+  }
+  button {
+    background: #238636;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    margin: 8px 4px 8px 0;
+  }
+  button:hover {
+    background: #2ea043;
+  }
+  .copy-hint {
+    font-size: 11px;
+    color: #8b949e;
+    margin-top: 4px;
+  }
+</style>
+
+<h1>🚀 Miruro Plugin - GitHub Push Guide</h1>
+
+<div class="step">
+  <div class="step-title">✓ Step 1: Navigate to Your Repository</div>
+  <div class="command" id="cmd1">cd C:\Users\liome\my-repo</div>
+  <div class="copy-hint">Click the command above to copy it</div>
+</div>
+
+<div class="step">
+  <div class="step-title">✓ Step 2: Stage All Changes</div>
+  <div class="command" id="cmd2">git add -A</div>
+  <div class="copy-hint">Click the command above to copy it</div>
+</div>
+
+<div class="step">
+  <div class="step-title">✓ Step 3: Commit with Message</div>
+  <div class="command" id="cmd3">git commit -m "feat: miruro plugin for skystream - anilist + consumet streams
+
+- Implement getHome using Anilist GraphQL for trending/popular/upcoming anime
+- Implement search with Anilist GraphQL query
+- Implement load with full anime details, episodes (season 0 for movies, season 1 for series), cast, and recommendations
+- Implement loadStreams using Consumet Meta API for video sources
+- All 4 functions tested and passing with skystream CLI
+- Proper JSON serialization with correct headers for streaming"</div>
+  <div class="copy-hint">Click the command above to copy it</div>
+</div>
+
+<div class="step">
+  <div class="step-title">✓ Step 4: Push to GitHub</div>
+  <div class="command" id="cmd4">git push -u origin main</div>
+  <div class="copy-hint">Click the command above to copy it</div>
+</div>
+
+<h2>⏱️ After Push (Wait ~30 seconds)</h2>
+<div class="step">
+  <div class="step-title">GitHub Actions Workflow</div>
+  <p>Once you push, GitHub Actions will automatically run. After ~30 seconds, check:</p>
+  <div class="command">https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/actions</div>
+</div>
+
+<h2>📍 Your Raw repo.json Link</h2>
+<div class="step">
+  <div class="step-title"><span class="info">After workflow completes:</span></div>
+  <div class="command" id="repoLink">https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO_NAME/main/dist/repo.json</div>
+  <div class="copy-hint">Replace YOUR_USERNAME and YOUR_REPO_NAME with your actual GitHub details</div>
+</div>
+
+<h2>📋 Summary of Changes</h2>
+<div class="command-block">
+  <div class="label">Files Modified:</div>
+  <ul>
+    <li><code>plugin.json</code> - Updated with miruro.bz baseUrl</li>
+    <li><code>plugin.js</code> - Complete miruro plugin (1000+ lines)</li>
+  </ul>
+
+  <div class="label">Functions Implemented & Tested ✓:</div>
+  <ul>
+    <li><span class="success">✓ getHome</span> - Anilist trending/popular/upcoming</li>
+    <li><span class="success">✓ search</span> - Anilist GraphQL search</li>
+    <li><span class="success">✓ load</span> - Full anime details with episodes (season 0 for movies, season 1 for series)</li>
+    <li><span class="success">✓ loadStreams</span> - Consumet API + fallback streams</li>
+  </ul>
+
+  <div class="label">Quality Checks:</div>
+  <ul>
+    <li><span class="success">✓</span> All 4 functions pass skystream CLI tests</li>
+    <li><span class="success">✓</span> Valid JSON with no serialization errors</li>
+    <li><span class="success">✓</span> Correct headers for streaming links</li>
+    <li><span class="success">✓</span> Proper episode numbering for movies vs series</li>
+  </ul>
+</div>
+
+<script>
+document.querySelectorAll('.command').forEach(el => {
+  el.addEventListener('click', function() {
+    const text = this.textContent.trim();
+    navigator.clipboard.writeText(text).then(() => {
+      const oldText = this.textContent;
+      this.textContent = '✓ Copied!';
+      this.style.color = '#3fb950';
+      setTimeout(() => {
+        this.textContent = oldText;
+        this.style.color = '#79c0ff';
+      }, 2000);
+    });
+  });
+  this.style.cursor = 'pointer';
+});
+</script>
+

@@ -1,0 +1,251 @@
+<title>Miruro Plugin - Push to GitHub</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+    background: #0d1117;
+    color: #c9d1d9;
+    padding: 24px;
+    line-height: 1.6;
+  }
+  .container {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  h1 {
+    color: #58a6ff;
+    margin-bottom: 24px;
+    font-size: 28px;
+  }
+  h2 {
+    color: #79c0ff;
+    margin-top: 32px;
+    margin-bottom: 16px;
+    font-size: 18px;
+    border-bottom: 1px solid #30363d;
+    padding-bottom: 8px;
+  }
+  .step {
+    background: #161b22;
+    border-left: 3px solid #238636;
+    padding: 16px;
+    margin: 16px 0;
+    border-radius: 6px;
+  }
+  .step-num {
+    display: inline-block;
+    background: #238636;
+    color: white;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 28px;
+    margin-right: 10px;
+    font-weight: bold;
+  }
+  .step-title {
+    font-weight: 600;
+    color: #58a6ff;
+    margin-bottom: 12px;
+  }
+  .cmd-block {
+    background: #010409;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 12px;
+    margin: 12px 0;
+    font-size: 13px;
+    overflow-x: auto;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .cmd-block:hover {
+    border-color: #58a6ff;
+  }
+  .cmd-block.copied {
+    border-color: #238636;
+    background: #010409;
+  }
+  code {
+    color: #79c0ff;
+    font-family: 'Courier New', monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .note {
+    background: #0d3b66;
+    border-left: 3px solid #79c0ff;
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .warning {
+    background: #66330d;
+    border-left: 3px solid #d29922;
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .success {
+    background: #0d3d1d;
+    border-left: 3px solid #3fb950;
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .copy-hint {
+    font-size: 11px;
+    color: #8b949e;
+    margin-top: 6px;
+  }
+  .link-box {
+    background: #010409;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 16px;
+    margin: 16px 0;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    word-break: break-all;
+    color: #79c0ff;
+  }
+  ul { margin-left: 20px; }
+  li { margin: 8px 0; }
+  .changes-list {
+    background: #161b22;
+    padding: 16px;
+    border-radius: 6px;
+    margin: 16px 0;
+  }
+  .changes-list li {
+    margin: 6px 0;
+  }
+</style>
+
+<div class="container">
+  <h1>🚀 Miruro Plugin - Push to GitHub</h1>
+
+  <div class="note">
+    <strong>📝 About to push:</strong> Your miruro plugin with all 4 functions tested and working!
+  </div>
+
+  <h2>Commands to Run</h2>
+
+  <div class="step">
+    <div class="step-title"><span class="step-num">1</span>Navigate to repo</div>
+    <div class="cmd-block" onclick="copyToClipboard(this)">
+      <code>cd C:\Users\liome\my-repo</code>
+    </div>
+    <div class="copy-hint">Click to copy</div>
+  </div>
+
+  <div class="step">
+    <div class="step-title"><span class="step-num">2</span>Stage all changes</div>
+    <div class="cmd-block" onclick="copyToClipboard(this)">
+      <code>git add -A</code>
+    </div>
+    <div class="copy-hint">Click to copy</div>
+  </div>
+
+  <div class="step">
+    <div class="step-title"><span class="step-num">3</span>Commit with message</div>
+    <div class="cmd-block" onclick="copyToClipboard(this)">
+      <code>git commit -m "feat: miruro plugin for skystream - anilist + consumet streams
+
+- Implement getHome using Anilist GraphQL for trending/popular/upcoming anime
+- Implement search with Anilist GraphQL query
+- Implement load with full anime details, episodes (season 0 for movies, season 1 for series), cast, and recommendations
+- Implement loadStreams using Consumet Meta API for video sources
+- All 4 functions tested and passing with skystream CLI
+- Proper JSON serialization with correct headers for streaming"</code>
+    </div>
+    <div class="copy-hint">Click to copy</div>
+  </div>
+
+  <div class="step">
+    <div class="step-title"><span class="step-num">4</span>Push to GitHub</div>
+    <div class="cmd-block" onclick="copyToClipboard(this)">
+      <code>git push -u origin main</code>
+    </div>
+    <div class="copy-hint">Click to copy</div>
+  </div>
+
+  <h2>⏱️ After Push</h2>
+
+  <div class="success">
+    <strong>✓ GitHub Actions will run automatically</strong><br>
+    Wait ~30 seconds for the workflow to complete
+  </div>
+
+  <h2>📍 Your Raw repo.json Link</h2>
+
+  <div class="warning">
+    <strong>⚠️ Replace these placeholders:</strong><br>
+    - <code>YOUR_USERNAME</code> → your GitHub username<br>
+    - <code>YOUR_REPO_NAME</code> → your repository name (e.g., my-repo-miruro)
+  </div>
+
+  <div class="link-box">
+    https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO_NAME/main/dist/repo.json
+  </div>
+
+  <h2>✅ What You're Pushing</h2>
+
+  <div class="changes-list">
+    <strong>Modified Files:</strong>
+    <ul>
+      <li><code>plugin.json</code> - Miruro domain configuration</li>
+      <li><code>plugin.js</code> - Complete plugin implementation (1000+ lines)</li>
+    </ul>
+
+    <strong style="display: block; margin-top: 12px;">Functions Implemented & Tested:</strong>
+    <ul>
+      <li>✓ <strong>getHome</strong> - Anilist trending/popular/upcoming</li>
+      <li>✓ <strong>search</strong> - Anilist GraphQL search</li>
+      <li>✓ <strong>load</strong> - Full anime details with episodes (S0 for movies, S1 for series)</li>
+      <li>✓ <strong>loadStreams</strong> - Consumet API + fallback streams</li>
+    </ul>
+
+    <strong style="display: block; margin-top: 12px;">Quality Checks:</strong>
+    <ul>
+      <li>✓ All 4 functions pass skystream CLI tests</li>
+      <li>✓ Valid JSON with no serialization errors</li>
+      <li>✓ Correct headers for streaming links</li>
+      <li>✓ Proper episode numbering</li>
+    </ul>
+  </div>
+
+  <h2>🔍 Verify Your Push</h2>
+
+  <div class="note">
+    After pushing, visit your repo's Actions tab:<br>
+    <code style="color: #79c0ff;">https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/actions</code><br><br>
+    Look for a workflow named "Deploy" or similar - it should complete within 30 seconds and turn <strong style="color: #3fb950;">green ✓</strong>
+  </div>
+
+</div>
+
+<script>
+function copyToClipboard(element) {
+  const text = element.querySelector('code').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const originalClass = element.className;
+    element.classList.add('copied');
+    element.textContent = '✓ Copied!';
+    element.style.color = '#3fb950';
+    setTimeout(() => {
+      element.className = originalClass;
+      element.textContent = '';
+      const code = document.createElement('code');
+      code.textContent = text;
+      element.appendChild(code);
+      element.style.color = '#79c0ff';
+    }, 2000);
+  });
+}
+</script>
+

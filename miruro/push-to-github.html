@@ -1,0 +1,418 @@
+<title>Miruro Plugin - Push to GitHub</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 20px;
+  }
+  .container {
+    max-width: 1000px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 25px 50px rgba(0,0,0,0.25);
+    overflow: hidden;
+  }
+  .header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 50px 40px;
+    text-align: center;
+  }
+  .header h1 {
+    font-size: 36px;
+    margin-bottom: 12px;
+    font-weight: 700;
+  }
+  .header p {
+    font-size: 16px;
+    opacity: 0.95;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .content {
+    padding: 40px;
+  }
+  .step {
+    margin-bottom: 40px;
+    border-left: 4px solid #667eea;
+    padding-left: 30px;
+    position: relative;
+  }
+  .step:before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 0;
+    width: 24px;
+    height: 24px;
+    background: #667eea;
+    border: 3px solid white;
+    border-radius: 50%;
+    box-shadow: 0 0 0 3px #667eea;
+  }
+  .step-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 15px;
+  }
+  .command-container {
+    background: #f8f8f8;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 0;
+    overflow: hidden;
+    margin: 15px 0;
+  }
+  .command-block {
+    background: #1e1e1e;
+    color: #00d4ff;
+    padding: 16px;
+    font-family: 'Courier New', 'Monaco', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-x: auto;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.2s;
+  }
+  .command-block:hover {
+    background: #2d2d2d;
+  }
+  .command-block.copied {
+    background: #1b5e20;
+  }
+  .copy-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(102, 126, 234, 0.9);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.2s;
+    font-weight: 600;
+  }
+  .command-block:hover .copy-btn {
+    opacity: 1;
+  }
+  .copy-btn:hover {
+    background: #764ba2;
+  }
+  .copy-btn.copied {
+    background: #4caf50;
+    opacity: 1;
+  }
+  .description {
+    font-size: 13px;
+    color: #666;
+    margin-top: 10px;
+    font-style: italic;
+  }
+  .info-box {
+    background: #e3f2fd;
+    border-left: 4px solid #2196f3;
+    padding: 16px;
+    margin: 30px 0;
+    border-radius: 6px;
+    font-size: 14px;
+    color: #1565c0;
+  }
+  .success-box {
+    background: #e8f5e9;
+    border-left: 4px solid #4caf50;
+    padding: 16px;
+    margin: 30px 0;
+    border-radius: 6px;
+    font-size: 14px;
+    color: #2e7d32;
+  }
+  .warning-box {
+    background: #fff3e0;
+    border-left: 4px solid #ff9800;
+    padding: 16px;
+    margin: 30px 0;
+    border-radius: 6px;
+    font-size: 14px;
+    color: #e65100;
+  }
+  h2 {
+    font-size: 24px;
+    color: #333;
+    margin: 40px 0 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #f0f0f0;
+  }
+  .timeline {
+    margin: 30px 0;
+  }
+  .timeline-item {
+    display: flex;
+    margin-bottom: 20px;
+  }
+  .timeline-marker {
+    width: 60px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .timeline-dot {
+    width: 14px;
+    height: 14px;
+    background: #667eea;
+    border-radius: 50%;
+    display: inline-block;
+    margin-top: 2px;
+  }
+  .timeline-dot.done {
+    background: #4caf50;
+  }
+  .timeline-line {
+    width: 2px;
+    background: #e0e0e0;
+    margin: 14px auto 0;
+  }
+  .timeline-content {
+    flex-grow: 1;
+    padding-top: 0;
+  }
+  .timeline-content strong {
+    color: #333;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .timeline-content small {
+    color: #666;
+    display: block;
+  }
+  .features {
+    background: #f9f9f9;
+    padding: 24px;
+    border-radius: 8px;
+    margin: 20px 0;
+  }
+  .features h3 {
+    color: #333;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .features ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .features li {
+    padding: 8px 0;
+    color: #555;
+    font-size: 13px;
+    border-bottom: 1px solid #eee;
+  }
+  .features li:last-child {
+    border-bottom: none;
+  }
+  .features li:before {
+    content: "✓ ";
+    color: #4caf50;
+    font-weight: bold;
+    margin-right: 8px;
+  }
+  code {
+    background: #f5f5f5;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+  }
+  .badge {
+    display: inline-block;
+    background: #667eea;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    margin: 0 4px 0 0;
+  }
+  .badge.success {
+    background: #4caf50;
+  }
+</style>
+
+<div class="container">
+  <div class="header">
+    <h1>🚀 Push Miruro Plugin to GitHub</h1>
+    <p>Complete workflow to deploy your plugin and get your raw repo.json link</p>
+  </div>
+
+  <div class="content">
+    <div class="info-box">
+      <strong>✓ Plugin Status:</strong> All 4 functions tested and working perfectly! Ready to push.
+    </div>
+
+    <h2>📋 Step-by-Step Commands</h2>
+
+    <div class="step">
+      <div class="step-title">Step 1: Navigate to Repository</div>
+      <div class="command-container">
+        <div class="command-block" onclick="copyCommand(this)">
+          <span class="copy-btn">Copy</span>cd C:\Users\liome\my-repo
+        </div>
+      </div>
+      <div class="description">Opens your repository directory</div>
+    </div>
+
+    <div class="step">
+      <div class="step-title">Step 2: Stage All Changes</div>
+      <div class="command-container">
+        <div class="command-block" onclick="copyCommand(this)">
+          <span class="copy-btn">Copy</span>git add -A
+        </div>
+      </div>
+      <div class="description">Stages plugin.json and plugin.js for commit</div>
+    </div>
+
+    <div class="step">
+      <div class="step-title">Step 3: Commit with Message</div>
+      <div class="command-container">
+        <div class="command-block" onclick="copyCommand(this)">
+          <span class="copy-btn">Copy</span>git commit -m "feat: miruro plugin for skystream - anilist + consumet streams
+
+- Implement getHome using Anilist GraphQL for trending/popular/upcoming anime
+- Implement search with Anilist GraphQL query
+- Implement load with full anime details, episodes (season 0 for movies, season 1 for series), cast, and recommendations
+- Implement loadStreams using Consumet Meta API for video sources
+- All 4 functions tested and passing with skystream CLI
+- Proper JSON serialization with correct headers for streaming"
+        </div>
+      </div>
+      <div class="description">Creates commit with detailed description of changes</div>
+    </div>
+
+    <div class="step">
+      <div class="step-title">Step 4: Push to GitHub</div>
+      <div class="command-container">
+        <div class="command-block" onclick="copyCommand(this)">
+          <span class="copy-btn">Copy</span>git push -u origin main
+        </div>
+      </div>
+      <div class="description">Pushes commit to GitHub main branch</div>
+    </div>
+
+    <h2>⏱️ Timeline: What Happens Next</h2>
+
+    <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-marker">
+          <div class="timeline-dot"></div>
+          <div class="timeline-line"></div>
+        </div>
+        <div class="timeline-content">
+          <strong>You Push to GitHub</strong>
+          <small>Your changes are now on the remote repository</small>
+        </div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="timeline-marker">
+          <div class="timeline-dot"></div>
+          <div class="timeline-line"></div>
+        </div>
+        <div class="timeline-content">
+          <strong>GitHub Actions Triggers</strong>
+          <small>Automated workflow begins (look for yellow dot in Actions tab)</small>
+        </div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="timeline-marker">
+          <div class="timeline-dot done"></div>
+        </div>
+        <div class="timeline-content">
+          <strong>Workflow Complete (~30 seconds)</strong>
+          <small>Green checkmark ✓ appears, dist/repo.json is ready!</small>
+        </div>
+      </div>
+    </div>
+
+    <div class="success-box">
+      <strong>✓ Workflow Completes!</strong> Your raw repo.json link:<br>
+      <code>https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO_NAME/main/dist/repo.json</code><br><br>
+      Replace <code>YOUR_USERNAME</code> and <code>YOUR_REPO_NAME</code> with your actual GitHub details.
+    </div>
+
+    <h2>✅ What You're Pushing</h2>
+
+    <div class="features">
+      <h3>📁 Files Modified</h3>
+      <ul>
+        <li><code>plugin.json</code> — Miruro domain configuration</li>
+        <li><code>plugin.js</code> — Complete plugin (1000+ lines)</li>
+      </ul>
+    </div>
+
+    <div class="features">
+      <h3>⚙️ Functions Implemented & Tested</h3>
+      <ul>
+        <li><strong>getHome</strong> — Anilist trending/popular/upcoming anime</li>
+        <li><strong>search</strong> — Anilist GraphQL full-text search</li>
+        <li><strong>load</strong> — Anime details with episodes (S0 for movies, S1 for series), cast, recommendations</li>
+        <li><strong>loadStreams</strong> — Consumet API video sources + fallback streams</li>
+      </ul>
+    </div>
+
+    <div class="features">
+      <h3>🔍 Quality Verification</h3>
+      <ul>
+        <li>All 4 functions pass skystream CLI tests</li>
+        <li>Valid JSON with no serialization errors</li>
+        <li>Correct headers for streaming links</li>
+        <li>Proper episode numbering for movies vs series</li>
+      </ul>
+    </div>
+
+    <h2>🔗 Verify Your Workflow</h2>
+
+    <div class="info-box">
+      <strong>After pushing, check your workflow status:</strong><br>
+      <code>https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/actions</code><br><br>
+      Look for the "Deploy" or latest workflow — it should turn <span class="badge success">green ✓</span> within ~30 seconds
+    </div>
+
+    <div class="warning-box">
+      <strong>⚠️ Next Steps:</strong> Once the workflow completes and turns green, come back with your raw repo.json URL and I'll verify it works with the Skystream system!
+    </div>
+  </div>
+</div>
+
+<script>
+function copyCommand(element) {
+  const text = element.textContent.trim().replace(/Copy$/, '').trim();
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = element.querySelector('.copy-btn');
+    const originalText = btn.textContent;
+
+    element.classList.add('copied');
+    btn.textContent = '✓ Copied!';
+    btn.classList.add('copied');
+
+    setTimeout(() => {
+      element.classList.remove('copied');
+      btn.textContent = originalText;
+      btn.classList.remove('copied');
+    }, 2500);
+  }).catch(err => {
+    console.error('Copy failed:', err);
+    const btn = element.querySelector('.copy-btn');
+    btn.textContent = '✗ Failed';
+  });
+}
+</script>

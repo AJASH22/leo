@@ -1,0 +1,10 @@
+{
+  "packageName": "com.miruro",
+  "name": "Miruro",
+  "version": 1,
+  "baseUrl": "https://www.miruro.bz",
+  "description": "Miruro - Anime streaming",
+  "authors": ["ajash"],
+  "languages": ["en", "ja"],
+  "categories": ["Anime"]
+}
