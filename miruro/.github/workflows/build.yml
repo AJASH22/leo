@@ -32,6 +32,9 @@ jobs:
       - name: Install skystream CLI
         run: npm install -g skystream-cli
 
+      - name: Run deterministic plugin checks
+        run: npm run test:unit
+
       - name: Validate plugins
         run: skystream validate
 

@@ -1,76 +1,74 @@
 # Architecture
 
-The plugin lives in [`miruro/plugin.js`](../miruro/plugin.js). It is a single self-contained
-IIFE that follows the SkyStream plugin contract. This document maps its sections.
+`miruro/plugin.js` is a single SkyStream plugin bundle. It exposes callback-compatible
+`getHome`, `search`, `load`, and `loadStreams` functions while keeping the implementation in
+modern async helpers.
 
-## Module map (top-to-bottom of `miruro/plugin.js`)
+## Module map
 
-| Section                    | Responsibility                                                                                       |
-| -------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **CONFIG**                 | `BASE_URL`, `PROVIDERS`, `HEADERS`, `HASHES` (GraphQL persisted-query hashes).                       |
-| **CACHE**                  | In-memory TTL cache + negative-result cache to prevent hammering failing sources.                    |
-| **LOGGING**                | `log` / `logError` prefixed console helpers.                                                         |
-| **GRAPHQL HELPERS**        | `encodeQueryParts`, `queryGraph`, `safeQueryGraph` — fire persisted-query GET/POST to AllAnime.      |
-| **DATA HELPERS**           | Pure functions: `hasEpisodes`, `preferredTitle`, `resolvePosterUrl`, `getPosterFallback`,            |
-|                            | `getStatusFromText`, `toMultimediaItem`, Jikan adapter.                                              |
-| **METADATA ENRICHMENT**    | `getAniListMedia` (AniList GraphQL), `getAniZipData` (AniZip mappings), `getJikan` (REST fallback).  |
-| **STREAM PIPELINE**        | `expandM3u8Streams`, `findMediaUrlsInHtml`, `resolveVidStackLike`, `resolveStreamWishLike`,          |
-|                            | `resolveFilemoonLike`, `resolveDirectEmbed`, `resolveEmbeddedSource`, `resolveSourceEntries`.        |
-| **PLUGIN FUNCTIONS**       | `getHome`, `search`, `load`, `loadStreams` — async, return data, wrapped in cb-style adapters.      |
-| **EXPORT**                 | Assigns the four functions to `globalThis` for the SkyStream host.                                   |
+| Section | Responsibility |
+| --- | --- |
+| **CONFIG** | Provider registry, preferences, headers, settings, and AllAnime hashes. |
+| **CACHE** | TTL cache for metadata/catalog and a short negative stream cache. |
+| **GRAPHQL HELPERS** | AllAnime persisted-query GET/POST and response validation. |
+| **DATA HELPERS** | Anime-only guards, source-aware ID envelopes, URL/title/status normalization, and provider mappers. |
+| **METADATA ENRICHMENT** | AniList GraphQL and AniZip episode mapping; Jikan, Kitsu, and HiAnime adapters. |
+| **STREAM PIPELINE** | Source normalization, bundled/runtime extractors, host adapters, direct media validation, and HLS expansion. |
+| **PLUGIN FUNCTIONS** | Provider failover for home/search, source-aware detail/episode loading, and stream dispatch. |
+| **EXPORT** | Assigns the four public functions to `globalThis`. |
 
-## Data flow
+## Provider flow
 
-```
-                ┌────────────────────────────────────────────────────┐
-                │ SkyStream app calls getHome() / search() / load()  │
-                │ / loadStreams() with (arg, cb)                      │
-                └──────────────────────┬─────────────────────────────┘
-                                       │
-                                       ▼
-                ┌────────────────────────────────────────────────────┐
-                │ Adapter wrapper in PLUGIN FUNCTIONS section:      │
-                │   await _getHome() then cb({ success, data })      │
-                └──────────────────────┬─────────────────────────────┘
-                                       │
-       ┌───────────────────────────────┼───────────────────────────────┐
-       │                               │                               │
-       ▼                               ▼                               ▼
- AllAnime GraphQL             AniList GraphQL                  Jikan REST (fallback)
- (catalog + streams)          (metadata enrichment)            (catalog + search only)
-       │                               │                               │
-       └───────── merged into a single ─┴───────── merged into a single ┘
-                          MultimediaItem
-
-Streams: AllAnime → resolveSourceEntries → resolveEmbeddedSource
-                                              ├── resolveVidStackLike
-                                              ├── resolveStreamWishLike
-                                              ├── resolveFilemoonLike
-                                              └── resolveDirectEmbed
+```text
+SkyStream
+  │
+  ├─ getHome/search
+  │    └─ preferred provider → AllAnime → Jikan → Kitsu → optional HiAnime
+  │         └─ anime-only filtering → dedupe by MAL/AniList/title+year
+  │
+  ├─ load(source-aware item id)
+  │    ├─ AllAnime detail + AniList + AniZip
+  │    ├─ HiAnime detail + episodes
+  │    └─ Jikan/Kitsu fallback detail
+  │
+  └─ loadStreams(source-aware episode id)
+       ├─ HiAnime source endpoint
+       ├─ AllAnime GraphQL server endpoint
+       ├─ metadata id → AniList title → AllAnime routing
+       └─ extractor registry → direct media validation → HLS variants
 ```
 
-## Why callback wrappers?
+## Anime-only contract
 
-The SkyStream CLI (`skystream test`) and host both call plugin functions as
-`async function name(arg, cb)` and expect `cb({ success, data })`. The plugin
-keeps the internal functions modern (`async`, return value) and the exports
-are 4-line adapters. This makes the code easier to read and unit-test while
-remaining wire-compatible.
+`isAnimeRecord` rejects manga-shaped fields and explicit non-video formats before mapping. This is
+applied to provider data, home sections, search results, and detail responses. A source-aware ID
+contains `v: 2`, its provider name, the provider ID, optional MAL/AniList IDs, episode, and dub
+status. Legacy AllAnime payloads are accepted for existing cached episodes.
 
-## Caching strategy
+## Metadata model
 
-- `metadata` (10 min) — AllAnime detail payloads.
-- `search` (5 min) — search results.
-- `home` (5 min) — home page.
-- `stream_failed` (1 min) — negative cache for stream URLs that failed extraction so the
-  pipeline doesn't re-walk the same dead hosts within a short window.
+AllAnime/Jikan/Kitsu/HiAnime provide the base `MultimediaItem`. AniList enriches details with
+alternate titles, banner/cover, format, tags, studios, characters and voice actors, trailer,
+recommendations, relations, score, and next airing. AniZip fills per-episode title, overview,
+runtime, date, and image when a MAL ID exists. Provenance remains in `syncData`.
 
-Max 200 entries; oldest 20% are evicted on overflow.
+## Stream safety and reliability
 
-## Failure handling
+- Only URLs matching HLS/DASH/MP4/WebM patterns (or known playlist/manifest query forms) are
+  accepted as playable media.
+- Relative links are resolved against the provider response URL.
+- Runtime extractors are preferred; if the host exposes the optional extractor registry, supported
+  Dood/Filemoon/HubCloud/MixDrop/RabbitStream/StreamSB/StreamTape/StreamWish/VidHidePro/Voe
+  implementations are dispatched by hostname.
+- Extractors preserve referer and subtitle data and expand HLS master playlists into quality
+  variants where possible.
+- Failed hosts are negatively cached for one minute; a dead host does not permanently poison an
+  episode.
+- A raw iframe URL is never returned as a playable stream.
 
-- Cloudflare challenges surface as `CLOUDFLARE_BLOCK` and trigger the Jikan fallback for
-  catalog/search (streams still need a working AllAnime — no real fallback there yet).
-- GraphQL `PERSISTED_QUERY_NOT_FOUND` / `AA_CRYPTO_MISSING` are handled by re-issuing the
-  query as a raw text query (see `loadStreams`).
-- M3U8 variants are expanded into separate `StreamResult` entries with quality labels.
+## Caching
+
+- Metadata: 10 minutes.
+- Search/home: 5 minutes.
+- Failed stream entries: 1 minute.
+- Maximum 200 entries, evicting the oldest 20% when full.

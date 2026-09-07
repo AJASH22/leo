@@ -9,10 +9,8 @@
     "test:home": "skystream test -p miruro -f getHome",
     "test:search": "skystream test -p miruro -f search -q \"naruto\"",
     "test:load": "skystream test -p miruro -f load -q \"<allanime-show-id>\"",
-    "test:streams": "skystream test -p miruro -f loadStreams -q '{\"hash\":\"<id>\",\"episode\":\"1\",\"dubStatus\":\"sub\"}'",
-    "test": "skystream validate"
-  },
-  "devDependencies": {
-    "skystream-extractors": "latest"
+    "test:streams": "skystream test -p miruro -f loadStreams -q '{\"v\":2,\"source\":\"allanime\",\"id\":\"<id>\",\"episode\":\"1\",\"dubStatus\":\"sub\"}'",
+    "test:unit": "node scripts/test-plugin.js",
+    "test": "npm run test:unit && skystream validate"
   }
 }

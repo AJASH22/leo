@@ -1,7 +1,7 @@
 # 🌌 Miruro — SkyStream Plugin Repository
 
-> Anime streaming for [SkyStream](https://github.com/akashdh11/skystream).
-> AllAnime + Jikan + AniList for catalog, multi-provider stream resolution.
+> Anime-only streaming for [SkyStream](https://github.com/akashdh11/skystream).
+> AllAnime + Jikan + Kitsu + optional self-hosted HiAnime, with AniList/AniZip metadata and validated multi-provider streams.
 
 ## 🚀 Install in SkyStream
 
@@ -53,11 +53,11 @@ skystream test -p miruro -f getHome
 # Search
 skystream test -p miruro -f search -q "naruto"
 
-# Detail page (replace with a real AllAnime show id)
+# Detail page (replace with a real source-aware or legacy show id)
 skystream test -p miruro -f load -q "<allanime-show-id>"
 
-# Streams (JSON payload — see miruro/plugin.js#loadStreams)
-skystream test -p miruro -f loadStreams -q '{"hash":"<id>","episode":"1","dubStatus":"sub"}'
+# Streams (v2 source-aware payload; legacy {hash,...} is still accepted)
+skystream test -p miruro -f loadStreams -q '{"v":2,"source":"allanime","id":"<id>","episode":"1","dubStatus":"sub"}'
 ```
 
 ### Deploy locally
@@ -71,10 +71,12 @@ Actions workflow does the same.
 
 ## 🧱 Architecture
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a module map of the plugin code, and
-[`docs/API.md`](docs/API.md) for the upstream endpoints (AllAnime GraphQL, AniList, AniZip, Jikan).
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the provider and stream pipeline, and
+[`docs/API.md`](docs/API.md) for AllAnime, Jikan, Kitsu, HiAnime, AniList, AniZip, and extractor hosts.
 
-Common gotchas live in [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
+The plugin deliberately rejects manga, manhwa, manhua, novels, and other non-video records.
+Configure an optional self-hosted HiAnime API from the SkyStream extension settings; it is never
+required for catalog browsing. Common gotchas live in [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
 ## 🤝 Contributing
 

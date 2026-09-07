@@ -1,9 +1,9 @@
 /**
  * Miruro Anime Provider for SkyStream
  *
- * Catalog:  AllAnime GraphQL  →  Jikan REST fallback
- * Streams:  AllAnime GraphQL  →  multi-host embed resolvers (VidStack, StreamWish, Filemoon, ...)
- * Meta:     AniList GraphQL + AniZip (when MAL id available)
+ * Catalog:  AllAnime GraphQL → Jikan → Kitsu → optional self-hosted HiAnime API
+ * Streams:  provider adapters → bundled SkyStream extractors → validated media URLs
+ * Meta:     AniList GraphQL + Jikan + AniZip (when MAL id is available)
  *
  * Plugin contract (per skystream-cli):
  *   async function getHome(cb)
@@ -27,24 +27,38 @@
         ? String(manifest.baseUrl).replace(/\/+$/, "")
         : "https://allanime.to";
 
-    // Provider profiles — selectable from app settings at runtime.
+    // Anime-only provider profiles. HiAnime is intentionally configurable because its API
+    // is designed for personal/self-hosted deployments, not a permanent public endpoint.
     var PROVIDERS = [
-        { id: "AllAnime", baseUrl: "https://allanime.to",   apiUrl: "https://api.allanime.day/api" },
-        { id: "AllManga", baseUrl: "https://allmanga.to",   apiUrl: "https://api.allanime.day/api" }
+        { id: "AllAnime", baseUrl: "https://allanime.to", apiUrl: "https://api.allanime.day/api", kind: "allanime" },
+        { id: "Jikan", baseUrl: "https://api.jikan.moe/v4", apiUrl: "https://api.jikan.moe/v4", kind: "jikan" },
+        { id: "Kitsu", baseUrl: "https://kitsu.io", apiUrl: "https://kitsu.io/api/edge", kind: "kitsu" },
+        { id: "HiAnime", baseUrl: "", apiUrl: "", kind: "hianime" }
     ];
 
-    // Resolve the active provider from a user preference (set via registerSettings below).
-    // Falls back to the first provider if the preference is unset.
-    function getProviderConfig() {
-        var id = "AllAnime";
+    function getPreferenceValue(key, fallback) {
         try {
             if (typeof getPreference === "function") {
-                var pref = getPreference("providerId");
-                if (pref) id = String(pref);
+                var value = getPreference(key);
+                if (value !== null && value !== undefined && String(value).length > 0) return String(value);
             }
-        } catch (e) { /* preference API unavailable, fall through */ }
+        } catch (e) { /* preference API unavailable */ }
+        return fallback;
+    }
+
+    function getHiAnimeBaseUrl() {
+        return getPreferenceValue("hiAnimeBaseUrl", "").replace(/\/+$/, "");
+    }
+
+    // Resolve the active provider from a preference, while auto mode keeps fallback enabled.
+    function getProviderMode() {
+        return getPreferenceValue("providerMode", "auto").toLowerCase();
+    }
+
+    function getProviderConfig(id) {
+        var target = id || getPreferenceValue("providerId", "AllAnime");
         for (var i = 0; i < PROVIDERS.length; i++) {
-            if (PROVIDERS[i].id.toLowerCase() === id.toLowerCase()) return PROVIDERS[i];
+            if (PROVIDERS[i].id.toLowerCase() === String(target).toLowerCase()) return PROVIDERS[i];
         }
         return PROVIDERS[0];
     }
@@ -52,38 +66,57 @@
     function getApiUrl() {
         return (typeof manifest !== "undefined" && manifest && manifest.apiUrl)
             ? String(manifest.apiUrl).replace(/\/+$/, "")
-            : getProviderConfig().apiUrl;
+            : getProviderConfig("AllAnime").apiUrl;
     }
 
     var HEADERS = {
         "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36",
         "Accept": "application/json",
         "app-version": "android_c-247",
-        "from-app": "allmanga",
+        "from-app": "allanime",
         "platformstr": "android_c",
-        "Referer": "https://allmanga.to",
-        "Origin": "https://allmanga.to"
+        "Referer": "https://allanime.to",
+        "Origin": "https://allanime.to"
     };
 
-    // Expose a settings schema so the host app can let users switch providers.
+    // The host may expose these settings in its extension settings UI.
     if (typeof registerSettings === "function") {
         try {
             registerSettings({
+                providerMode: {
+                    type: "select",
+                    label: "Anime source mode",
+                    default: "auto",
+                    options: [
+                        { label: "Automatic failover", value: "auto" },
+                        { label: "AllAnime only", value: "allanime" },
+                        { label: "Jikan only", value: "jikan" },
+                        { label: "Kitsu only", value: "kitsu" },
+                        { label: "HiAnime API only", value: "hianime" }
+                    ]
+                },
                 providerId: {
                     type: "select",
-                    label: "Catalog/Stream Provider",
+                    label: "Preferred anime source",
                     default: "AllAnime",
                     options: [
-                        { label: "AllAnime (default)", value: "AllAnime" },
-                        { label: "AllManga",           value: "AllManga" }
+                        { label: "AllAnime", value: "AllAnime" },
+                        { label: "Jikan", value: "Jikan" },
+                        { label: "Kitsu", value: "Kitsu" },
+                        { label: "HiAnime API", value: "HiAnime" }
                     ]
+                },
+                hiAnimeBaseUrl: {
+                    type: "text",
+                    label: "Self-hosted HiAnime API URL",
+                    default: ""
                 }
             });
-        } catch (e) { /* registerSettings unavailable — preference won't be persisted */ }
+        } catch (e) { /* settings API unavailable */ }
     }
 
-    var PLUGIN_VERSION = 5;
-    var CATALOG_VERSION = 3;
+    var PLUGIN_VERSION = 6;
+    var CATALOG_VERSION = 4;
 
     // GraphQL persisted-query hashes. If AllAnime rotates its bundle these must be refreshed.
     // See docs/API.md for how to extract them.
@@ -228,6 +261,63 @@
     // DATA HELPERS
     // ============================================================================
 
+    var REJECTED_MEDIA_TYPES = /(^|\\b)(manga|manhwa|manhua|comic|novel|light novel|web novel|doujin)(\\b|$)/i;
+    var VIDEO_MEDIA_TYPES = /(^|\\b)(anime|tv|movie|ova|ona|special|music|series|film)(\\b|$)/i;
+
+    function isAnimeType(value) {
+        if (!value) return true;
+        var text = String(value).toLowerCase().trim();
+        if (REJECTED_MEDIA_TYPES.test(text)) return false;
+        return VIDEO_MEDIA_TYPES.test(text) || text === "";
+    }
+
+    function isAnimeRecord(record) {
+        if (!record) return false;
+        var type = record.type || record.format || record.kind || record.mediaType;
+        if (!isAnimeType(type)) return false;
+        if (record.type && REJECTED_MEDIA_TYPES.test(String(record.type))) return false;
+        if (record.format && REJECTED_MEDIA_TYPES.test(String(record.format))) return false;
+        if (record.chapters || record.volumes || record.chapterCount) return false;
+        if (record.isManga === true || record.media_type === "manga") return false;
+        return true;
+    }
+
+    function sourceId(source, id, extras) {
+        var payload = Object.assign({ v: 2, source: source, id: String(id || "") }, extras || {});
+        return JSON.stringify(payload);
+    }
+
+    function parseSourceId(value) {
+        var parsed = value;
+        if (!parsed || typeof parsed !== "object") {
+            try { parsed = JSON.parse(String(value || "")); }
+            catch (e) { parsed = null; }
+        }
+        if (parsed && typeof parsed === "object") {
+            // v1 episode payloads used `hash`; normalize them without breaking old clients.
+            if (parsed.hash && !parsed.id) parsed.id = parsed.hash;
+            parsed.v = parsed.v || 1;
+            parsed.source = parsed.source || "allanime";
+            return parsed;
+        }
+        return { v: 1, source: "allanime", id: String(value || "") };
+    }
+
+    function getAnimeMergeKey(record) {
+        if (!record) return "";
+        if (record.idMal || record.mal_id) return "mal:" + String(record.idMal || record.mal_id);
+        if (record.anilistId || record.id) return "anilist:" + String(record.anilistId || record.id);
+        var title = record.title || record.name || record.englishName || record.title_english || "";
+        var year = record.year || (record.airedStart && record.airedStart.year) || "";
+        return (String(title).toLowerCase().replace(/[^a-z0-9]+/g, "-") + ":" + year);
+    }
+
+    function absoluteUrl(value, baseUrl) {
+        if (!value) return "";
+        try { return new URL(String(value), baseUrl || "https://allanime.day").toString(); }
+        catch (e) { return String(value); }
+    }
+
     function hasEpisodes(edge) {
         if (!edge) return false;
         var available = edge.availableEpisodes;
@@ -264,45 +354,77 @@
         return "unknown";
     }
 
-    function toMultimediaItem(edge) {
-        if (!edge || !edge._id) return null;
+    function toMultimediaItem(edge, sourceName) {
+        if (!edge || !edge._id || !isAnimeRecord(edge)) return null;
         var typeStr = (edge.type || "").toLowerCase();
         var itemType = typeStr.indexOf("movie") !== -1 ? "movie" : "anime";
-
+        var tags = Array.isArray(edge.genres) ? edge.genres : (Array.isArray(edge.tags) ? edge.tags : []);
         return new MultimediaItem({
             title:     preferredTitle(edge),
-            url:       edge._id,
+            url:       sourceId(sourceName || "allanime", edge._id, { malId: edge.idMal || null }),
             posterUrl: resolvePosterUrl(edge.thumbnail),
             type:      itemType,
             year:      edge.airedStart && edge.airedStart.year ? edge.airedStart.year : 0,
-            description: edge.description ? edge.description.replace(/<[^>]*>/g, "").substring(0, 500) : "",
+            description: edge.description ? edge.description.replace(/<[^>]*>/g, "").substring(0, 1000) : "",
             status:    getStatusFromText(edge.status),
-            tags:      [],
+            tags:      tags,
+            score:     edge.averageScore ? Number(edge.averageScore) / 10 : 0,
+            syncData: { source: sourceName || "allanime", allanimeId: edge._id, malId: edge.idMal || null },
             headers:   HEADERS
         });
     }
 
-    // Adapt a Jikan anime record into a MultimediaItem.
+    // Adapt a Jikan anime record into an anime-only MultimediaItem.
     function jikanToMultimediaItem(anime) {
-        if (!anime || !anime.mal_id) return null;
+        if (!anime || !anime.mal_id || !isAnimeRecord(anime)) return null;
         var title = anime.title_english || anime.title || anime.title_japanese || "Unknown";
-        var img = (anime.images && anime.images.jpg && anime.images.jpg.large_image_url) || getPosterFallback();
+        var img = (anime.images && anime.images.jpg && (anime.images.jpg.large_image_url || anime.images.jpg.image_url)) || getPosterFallback();
+        var banner = anime.images && anime.images.jpg && anime.images.jpg.large_image_url;
         var year = 0;
         if (anime.aired && anime.aired.from) {
             var m = String(anime.aired.from).match(/^(\d{4})/);
             if (m) year = parseInt(m[1], 10);
         }
+        var tags = [];
+        (anime.genres || []).concat(anime.themes || [], anime.demographics || []).forEach(function (g) {
+            if (g && g.name && tags.indexOf(g.name) === -1) tags.push(g.name);
+        });
         return new MultimediaItem({
             title:     title,
-            url:       String(anime.mal_id),
+            url:       sourceId("jikan", anime.mal_id, { malId: anime.mal_id }),
             posterUrl: img,
+            bannerUrl: banner || img,
             type:      anime.type && String(anime.type).toLowerCase() === "movie" ? "movie" : "anime",
             year:      year,
-            description: anime.synopsis ? String(anime.synopsis).substring(0, 500) : "",
+            description: anime.synopsis ? String(anime.synopsis).substring(0, 1000) : "",
             status:    getStatusFromText(anime.status),
-            tags:      Array.isArray(anime.genres) ? anime.genres.map(function (g) { return g && g.name; }).filter(Boolean) : [],
-            score:     anime.score ? anime.score / 10 : 0,
+            tags:      tags,
+            score:     anime.score ? Number(anime.score) / 10 : 0,
+            duration: anime.duration ? parseInt(String(anime.duration), 10) || 0 : 0,
+            syncData: { source: "jikan", malId: anime.mal_id, anilistId: anime.anilist_id || null },
             headers:   HEADERS
+        });
+    }
+
+    function kitsuToMultimediaItem(resource) {
+        if (!resource || !resource.id || !resource.attributes || !isAnimeRecord({ type: "anime" })) return null;
+        var attrs = resource.attributes;
+        var poster = attrs.posterImage && (attrs.posterImage.large || attrs.posterImage.original || attrs.posterImage.medium);
+        var banner = attrs.coverImage && (attrs.coverImage.large || attrs.coverImage.original || attrs.coverImage.medium);
+        var year = attrs.startDate ? parseInt(String(attrs.startDate).substring(0, 4), 10) || 0 : 0;
+        return new MultimediaItem({
+            title: (attrs.titles && (attrs.titles.en || attrs.titles.en_jp || attrs.titles.ja_jp)) || attrs.canonicalTitle || "Unknown",
+            url: sourceId("kitsu", resource.id, {}),
+            posterUrl: poster || getPosterFallback(),
+            bannerUrl: banner || poster || getPosterFallback(),
+            type: String(attrs.subtype || "tv").toLowerCase() === "movie" ? "movie" : "anime",
+            year: year,
+            description: attrs.synopsis ? String(attrs.synopsis).substring(0, 1000) : "",
+            status: getStatusFromText(attrs.status),
+            tags: Array.isArray(attrs.genres) ? attrs.genres.map(function (g) { return g.name || g; }) : [],
+            score: attrs.averageRating ? Number(attrs.averageRating) / 10 : 0,
+            syncData: { source: "kitsu", kitsuId: resource.id },
+            headers: HEADERS
         });
     }
 
@@ -317,13 +439,20 @@
         bannerImage
         coverImage { extraLarge large medium color }
         title { english romaji native userPreferred }
-        startDate { year }
-        endDate { year }
-        genres description(asHtml: false) averageScore meanScore status episodes duration
-        format season seasonYear studios(isMain: true) { nodes { name } }
-        characters(perPage: 8) {
-          edges { node { name { full } image { large } } role }
+        startDate { year month day }
+        endDate { year month day }
+        genres tags { name rank isMediaSpoiler }
+        description(asHtml: false)
+        averageScore meanScore popularity status episodes duration
+        format type countryOfOrigin isAdult season seasonYear
+        source ageRating contentRating
+        studios(isMain: true) { nodes { name isAnimationStudio } }
+        staff(perPage: 6) { edges { role node { name { full } image { large } } } }
+        characters(perPage: 10) {
+          edges { role voiceActors(language: JAPANESE) { name { full } image { large } } node { name { full } image { large } } }
         }
+        trailer { id site thumbnail }
+        relations { edges { relationType node { id idMal title { english romaji userPreferred } coverImage { large } format type } } }
         recommendations(perPage: 12) {
           edges {
             node {
@@ -333,7 +462,7 @@
             }
           }
         }
-        nextAiringEpisode { episode airingAt }
+        nextAiringEpisode { episode airingAt timeUntilAiring }
       }
     }`;
 
@@ -411,6 +540,77 @@
         }
     }
 
+    var KITSU_HEADERS = { "Accept": "application/vnd.api+json", "User-Agent": JIKAN_HEADERS["User-Agent"] };
+
+    async function kitsuGet(path) {
+        try {
+            var res = await http_get("https://kitsu.io/api/edge" + path, KITSU_HEADERS);
+            if (!res || res.status !== 200) return null;
+            return JSON.parse(res.body || "{}");
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function getHiAnimeBase() {
+        var base = getHiAnimeBaseUrl();
+        return base ? base : null;
+    }
+
+    async function hiAnimeGet(path) {
+        var base = getHiAnimeBase();
+        if (!base) return null;
+        try {
+            var res = await http_get(base + (path.charAt(0) === "/" ? path : "/" + path), {
+                "Accept": "application/json",
+                "User-Agent": HEADERS["User-Agent"]
+            });
+            if (!res || res.status < 200 || res.status >= 300) return null;
+            return JSON.parse(res.body || "{}");
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function unwrapApiData(value) {
+        if (!value) return null;
+        if (value.success === false) return null;
+        return value.data !== undefined ? value.data : value;
+    }
+
+    function normalizeHiAnimeList(value) {
+        var body = unwrapApiData(value) || {};
+        var list = Array.isArray(body) ? body : (body.animes || body.results || body.items || []);
+        return list.filter(isAnimeRecord).map(function (anime) {
+            var mapped = {
+                mal_id: anime.mal_id || anime.malId,
+                title: anime.title || anime.name,
+                title_english: anime.alternativeTitle,
+                synopsis: anime.synopsis,
+                type: anime.type,
+                images: { jpg: { large_image_url: anime.poster || anime.image } },
+                score: anime.score || anime.rating,
+                aired: { from: anime.aired && anime.aired.from },
+                genres: anime.genres || []
+            };
+            var item = mapped.mal_id ? jikanToMultimediaItem(mapped) : null;
+            if (!item) return new MultimediaItem({
+                title: anime.title || anime.name || "Unknown",
+                url: sourceId("hianime", anime.id || anime.slug, {}),
+                posterUrl: anime.poster || anime.image || getPosterFallback(),
+                type: String(anime.type || "TV").toLowerCase() === "movie" ? "movie" : "anime",
+                description: anime.synopsis || "",
+                year: anime.year || 0,
+                tags: anime.genres || [],
+                syncData: { source: "hianime", hianimeId: anime.id || anime.slug },
+                headers: HEADERS
+            });
+            item.syncData = { source: "hianime", hianimeId: anime.id || anime.slug, malId: anime.mal_id || anime.malId || null };
+            item.url = sourceId("hianime", anime.id || anime.slug, { malId: anime.mal_id || anime.malId || null });
+            return item;
+        }).filter(Boolean);
+    }
+
     // ============================================================================
     // STREAM PIPELINE
     // ============================================================================
@@ -448,6 +648,7 @@
             }
 
             if (!res || res.status !== 200) {
+                if (!isPlayableMediaUrl(m3u8Url)) return;
                 streamResults.push(new StreamResult({
                     url: m3u8Url,
                     source: sourceName || "HLS",
@@ -460,6 +661,7 @@
 
             var body = res.body || "";
             if (!body.includes("#EXTM3U") && !body.includes("#EXT-X-STREAM-INF")) {
+                if (!isPlayableMediaUrl(m3u8Url)) return;
                 streamResults.push(new StreamResult({
                     url: m3u8Url,
                     source: sourceName || "HLS",
@@ -510,24 +712,86 @@
         }
     }
 
-    function findMediaUrlsInHtml(html) {
+    function isPlayableMediaUrl(value) {
+        if (!value || typeof value !== "string") return false;
+        var clean = value.trim().replace(/[\\'\"<>]+$/g, "");
+        if (!/^https?:\/\//i.test(clean)) return false;
+        if (/\.(m3u8|mpd|mp4|webm|m4v)(?:[?#]|$)/i.test(clean)) return true;
+        return /(?:\/master(?:\.m3u8)?|\/(?:playlist|manifest)(?:[.?/]|$)|[?&](?:file|url|source)=)/i.test(clean);
+    }
+
+    function findMediaUrlsInHtml(html, baseUrl) {
         if (!html) return [];
         var urls = [];
         var patterns = [
-            /https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/gi,
-            /https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/gi,
-            /file\s*:\s*["']([^"']+)["']/gi,
-            /source\s*:\s*["']([^"']+\.m3u8[^"']*)["']/gi
+            /https?:\/\/[^\s"'<>\\]+/gi,
+            /(?:file|source|src|hls|dash)\s*[:=]\s*["']([^"']+)["']/gi,
+            /(?:file|source|src|hls|dash)\s*[:=]\s*`([^`]+)`/gi
         ];
         for (var i = 0; i < patterns.length; i++) {
-            var matches = html.match(patterns[i]);
-            if (matches) {
-                for (var j = 0; j < matches.length; j++) {
-                    urls.push(matches[j].replace(/['"]/g, ""));
-                }
+            var matches;
+            while ((matches = patterns[i].exec(html)) !== null) {
+                var candidate = matches[1] || matches[0];
+                candidate = candidate.replace(/^["'`\s]*(?:file|source|src|hls|dash)\s*[:=]\s*/i, "").replace(/[\'"`,;<>]+$/g, "");
+                candidate = absoluteUrl(candidate, baseUrl);
+                if (isPlayableMediaUrl(candidate) && urls.indexOf(candidate) === -1) urls.push(candidate);
             }
         }
         return urls;
+    }
+
+    function extractorInstances() {
+        // The host may provide a full extractor registry. Keep this plugin dependency-free so
+        // the SkyStream bundler works even when optional npm extractors are unavailable.
+        var classes = [];
+        if (typeof globalThis !== "undefined" && globalThis.SkyStreamExtractors) {
+            var registry = globalThis.SkyStreamExtractors;
+            classes = [registry.DoodExtractor, registry.Filemoon, registry.HubCloud, registry.MixDrop,
+                registry.RabbitStream, registry.StreamSb, registry.StreamTape, registry.StreamWish,
+                registry.VidHidePro, registry.Voe];
+        }
+        var result = [];
+        for (var i = 0; i < classes.length; i++) {
+            try { if (classes[i]) result.push(new classes[i]()); } catch (e) { /* optional extractor */ }
+        }
+        return result;
+    }
+
+    function extractorMatches(instance, url) {
+        if (!instance || !instance.mainUrl) return false;
+        try {
+            return new URL(url).hostname.toLowerCase().endsWith(new URL(instance.mainUrl).hostname.toLowerCase());
+        } catch (e) { return false; }
+    }
+
+    async function resolveWithBundledExtractor(url, referer, sourceName, subtitles, streamResults) {
+        var instances = extractorInstances();
+        for (var i = 0; i < instances.length; i++) {
+            var instance = instances[i];
+            if (!extractorMatches(instance, url)) continue;
+            try {
+                var links = await instance.getUrl(url, referer);
+                if (!Array.isArray(links)) continue;
+                for (var j = 0; j < links.length; j++) {
+                    var link = links[j];
+                    if (!link || !isPlayableMediaUrl(link.url)) continue;
+                    var mediaUrl = absoluteUrl(link.url, url);
+                    if (/\\.m3u8(?:[?#]|$)/i.test(mediaUrl)) {
+                        await expandM3u8Streams(mediaUrl, sourceName + " / " + (link.source || instance.name), link.headers && link.headers.Referer || referer, subtitles, streamResults);
+                    } else {
+                        streamResults.push(new StreamResult({
+                            url: mediaUrl,
+                            source: sourceName + " / " + (link.source || instance.name),
+                            quality: qualityFromText(String(link.quality || "")) || qualityFromText(mediaUrl) || "Auto",
+                            headers: link.headers || (referer ? { Referer: referer } : HEADERS),
+                            subtitles: subtitles || []
+                        }));
+                    }
+                }
+                if (streamResults.length > 0) return true;
+            } catch (e) { logError("extractor:" + instance.name, e); }
+        }
+        return false;
     }
 
     async function resolveVidStackLike(url, sourceName, subtitles, streamResults) {
@@ -548,7 +812,7 @@
                 } catch (e) { /* fall through to media-URL probe */ }
             }
 
-            var mediaUrls = findMediaUrlsInHtml(html);
+            var mediaUrls = findMediaUrlsInHtml(html, url);
             if (mediaUrls.length > 0) {
                 await expandM3u8Streams(mediaUrls[0], sourceName, url, subtitles, streamResults);
                 return true;
@@ -576,7 +840,7 @@
                 }
             }
 
-            var mediaUrls = findMediaUrlsInHtml(html);
+            var mediaUrls = findMediaUrlsInHtml(html, url);
             if (mediaUrls.length > 0) {
                 await expandM3u8Streams(mediaUrls[0], sourceName, url, subtitles, streamResults);
                 return true;
@@ -619,7 +883,7 @@
             var res = await http_get(url, HEADERS);
             if (!res || res.status !== 200) return false;
             var html = res.body || "";
-            var mediaUrls = findMediaUrlsInHtml(html);
+            var mediaUrls = findMediaUrlsInHtml(html, url);
             if (mediaUrls.length > 0) {
                 var quality = qualityFromText(sourceName) || "Auto";
                 streamResults.push(new StreamResult({
@@ -637,9 +901,14 @@
         }
     }
 
-    async function resolveEmbeddedSource(url, sourceName, subtitles, streamResults) {
+    async function resolveEmbeddedSource(url, sourceName, subtitles, streamResults, referer) {
         if (!url) return false;
+        url = absoluteUrl(url, referer || "https://allanime.day");
         var lowerUrl = url.toLowerCase();
+
+        if (!isPlayableMediaUrl(url) && await resolveWithBundledExtractor(url, referer, sourceName, subtitles, streamResults)) {
+            return true;
+        }
 
         if (/allanime\.uns\.bio|server1\.uns\.bio/.test(lowerUrl)) {
             return await resolveVidStackLike(url, sourceName, subtitles, streamResults);
@@ -657,33 +926,31 @@
             return await resolveDirectEmbed(url, sourceName, subtitles, streamResults);
         }
 
-        // Last resort: try the SDK's generic extractor, then direct probe.
+        // Prefer the host runtime extractor when present, then bundled extractors.
         if (typeof globalThis.loadExtractor === "function") {
             try {
                 var beforeCount = streamResults.length;
                 var resolved = false;
-                globalThis.loadExtractor(url, function (results) {
-                    if (results && results.length) {
-                        for (var i = 0; i < results.length; i++) {
-                            var r = results[i];
-                            if (r && r.url) {
-                                streamResults.push(new StreamResult({
-                                    url: r.url,
-                                    source: sourceName + " - " + (r.source || "Auto"),
-                                    quality: r.quality || qualityFromText(r.url) || "Auto",
-                                    headers: r.headers || HEADERS
-                                }));
-                            }
-                        }
+                var extractorResult = await globalThis.loadExtractor(url, referer);
+                var results = Array.isArray(extractorResult) ? extractorResult : [];
+                for (var i = 0; i < results.length; i++) {
+                    var r = results[i];
+                    if (r && isPlayableMediaUrl(r.url)) {
+                        streamResults.push(new StreamResult({
+                            url: absoluteUrl(r.url, url),
+                            source: sourceName + " - " + (r.source || "Auto"),
+                            quality: r.quality || qualityFromText(r.url) || "Auto",
+                            headers: r.headers || (referer ? { Referer: referer } : HEADERS),
+                            subtitles: subtitles || []
+                        }));
                         resolved = true;
                     }
-                });
-                return resolved || (streamResults.length > beforeCount);
-            } catch (e) {
-                return false;
-            }
+                }
+                if (resolved || streamResults.length > beforeCount) return true;
+            } catch (e) { logError("runtimeExtractor", e); }
         }
 
+        if (await resolveWithBundledExtractor(url, referer, sourceName, subtitles, streamResults)) return true;
         return await resolveDirectEmbed(url, sourceName, subtitles, streamResults);
     }
 
@@ -745,9 +1012,9 @@
             if (wasRecentlyFailed(failKey)) continue;
 
             try {
-                // Relative links → AllAnime's per-source JSON endpoint.
+                // Relative links are AllAnime's per-source JSON endpoint.
                 if (link.url.startsWith("/")) {
-                    var absUrl = "https://allanime.day" + link.url.replace(/\.json.*$/, "") + ".json?";
+                    var absUrl = absoluteUrl(link.url.replace(/\.json.*$/, "") + ".json?", "https://allanime.day");
                     try {
                         var jsonRes = await http_get(absUrl, HEADERS);
                         if (jsonRes && jsonRes.status === 200) {
@@ -760,7 +1027,8 @@
                                             subLink.link || subLink.url,
                                             link.sourceName + " - " + (subLink.resolution || subLink.quality || "Auto"),
                                             subtitles,
-                                            streamResults
+                                            streamResults,
+                                            absUrl
                                         );
                                         if (!ok) setCachedFailure(failKey);
                                     }
@@ -771,22 +1039,8 @@
                         logError("relativeLink", e);
                     }
                 } else {
-                    var ok = await resolveEmbeddedSource(link.url, link.sourceName, subtitles, streamResults);
-                    if (!ok) {
-                        // Last-ditch: SkyStream can play iframe embeds directly.
-                        if (/^https?:\/\//i.test(link.url)) {
-                            var q = qualityFromText(link.url) || qualityFromText(link.sourceName) || "Auto";
-                            streamResults.push(new StreamResult({
-                                url: link.url,
-                                source: "AllAnime - " + (link.sourceName || "Embed"),
-                                quality: q,
-                                headers: HEADERS
-                            }));
-                            log("resolve", "Added direct embed for: " + link.url.substring(0, 60));
-                        } else {
-                            setCachedFailure(failKey);
-                        }
-                    }
+                    var ok = await resolveEmbeddedSource(link.url, link.sourceName, subtitles, streamResults, link.referer || null);
+                    if (!ok) setCachedFailure(failKey);
                 }
             } catch (e) {
                 logError("sourceEntry", e);
@@ -813,135 +1067,159 @@
     // PLUGIN FUNCTIONS (modern async, return data directly)
     // ============================================================================
 
-    async function _getHome() {
-        log("home", "Fetching home sections");
+    function dedupeItems(items) {
+        var seen = {};
+        var result = [];
+        (items || []).forEach(function (item) {
+            if (!item || !isAnimeRecord(item)) return;
+            var key = getAnimeMergeKey({
+                title: item.title,
+                year: item.year,
+                id: item.syncData && (item.syncData.malId || item.syncData.anilistId)
+            });
+            if (seen[key]) return;
+            seen[key] = true;
+            result.push(item);
+        });
+        return result;
+    }
 
+    function providerSequence() {
+        var mode = getProviderMode();
+        var preferred = getProviderConfig();
+        if (mode !== "auto") {
+            var forced = getProviderConfig(mode);
+            return forced.kind === "hianime" && !getHiAnimeBase() ? [getProviderConfig("AllAnime"), getProviderConfig("Jikan"), getProviderConfig("Kitsu")] : [forced];
+        }
+        var list = [preferred];
+        ["AllAnime", "Jikan", "Kitsu", "HiAnime"].forEach(function (id) {
+            var config = getProviderConfig(id);
+            if (list.indexOf(config) === -1 && (config.kind !== "hianime" || getHiAnimeBase())) list.push(config);
+        });
+        return list;
+    }
+
+    async function allAnimeHome() {
         var now = new Date();
         var month = now.getMonth() + 1;
         var year = now.getFullYear();
         var season = month <= 3 ? "Winter" : month <= 6 ? "Spring" : month <= 9 ? "Summer" : "Fall";
-
         var categories = {
             "Trending": { search: { season: season, year: year }, translationType: "sub", countryOrigin: "ALL" },
-            "Popular":  { search: {},                                translationType: "sub", countryOrigin: "ALL" },
-            "Latest":   { search: {},                                translationType: "sub", countryOrigin: "ALL" },
-            "Movies":   { search: { types: ["Movie"] },              translationType: "sub", countryOrigin: "ALL" }
+            "Popular":  { search: {}, translationType: "sub", countryOrigin: "ALL" },
+            "Latest":   { search: {}, translationType: "sub", countryOrigin: "ALL" },
+            "Movies":   { search: { types: ["Movie"] }, translationType: "sub", countryOrigin: "ALL" }
         };
-
         var homeData = {};
-        var categoryEntries = Object.entries(categories);
-
-        try {
-            // AllAnime primary fetch.
-            var sectionResults = await Promise.allSettled(categoryEntries.map(async function (entry) {
-                var name = entry[0];
-                var variables = entry[1];
-                var res = await safeQueryGraph(
-                    Object.assign({}, variables, { limit: 26, page: 1 }),
-                    HASHES.mainPage,
-                    "GET"
-                );
-                if (!res || !res.data || !res.data.shows) return { name: name, items: [] };
-                var items = (res.data.shows.edges || [])
-                    .filter(hasEpisodes)              // filter edges first
-                    .map(toMultimediaItem)
-                    .filter(Boolean);
-                return { name: name, items: items };
-            }));
-
-            sectionResults.forEach(function (r) {
-                if (r.status !== "fulfilled") return;
-                if (!r.value.items || r.value.items.length === 0) return;
-                homeData[r.value.name] = r.value.items;
-            });
-        } catch (e) {
-            logError("homeAllAnime", e);
-        }
-
-        // Jikan fallback if AllAnime returned nothing usable.
-        if (Object.keys(homeData).length === 0) {
-            log("home", "AllAnime unavailable — falling back to Jikan");
-            try {
-                var topAiring = await jikanGet("/top/anime?filter=airing&limit=20");
-                if (topAiring && topAiring.length) {
-                    homeData["Trending"] = topAiring.map(jikanToMultimediaItem).filter(Boolean);
-                }
-                var topAll = await jikanGet("/top/anime?limit=20");
-                if (topAll && topAll.length) {
-                    homeData["Popular"] = topAll.map(jikanToMultimediaItem).filter(Boolean);
-                }
-                var upcoming = await jikanGet("/seasons/upcoming?limit=15");
-                if (upcoming && upcoming.data && upcoming.data.length) {
-                    homeData["Upcoming"] = upcoming.data.map(jikanToMultimediaItem).filter(Boolean);
-                } else if (upcoming && upcoming.length) {
-                    homeData["Upcoming"] = upcoming.map(jikanToMultimediaItem).filter(Boolean);
-                }
-            } catch (e) {
-                logError("homeJikan", e);
-            }
-        }
-
-        if (Object.keys(homeData).length === 0) {
-            throw new Error("HOME_FALLBACK_FAILED");
-        }
-
-        log("home", "Returning " + Object.keys(homeData).length + " sections");
+        var results = await Promise.allSettled(Object.entries(categories).map(async function (entry) {
+            var res = await safeQueryGraph(Object.assign({}, entry[1], { limit: 26, page: 1 }), HASHES.mainPage, "GET");
+            if (!res || !res.data || !res.data.shows) return { name: entry[0], items: [] };
+            return {
+                name: entry[0],
+                items: (res.data.shows.edges || []).filter(isAnimeRecord).filter(hasEpisodes).map(function (edge) {
+                    return toMultimediaItem(edge, "allanime");
+                }).filter(Boolean)
+            };
+        }));
+        results.forEach(function (result) {
+            if (result.status === "fulfilled" && result.value.items.length) homeData[result.value.name] = dedupeItems(result.value.items);
+        });
         return homeData;
+    }
+
+    async function jikanHome() {
+        var homeData = {};
+        var topAiring = await jikanGet("/top/anime?filter=airing&limit=20");
+        var topAll = await jikanGet("/top/anime?limit=20");
+        var upcoming = await jikanGet("/seasons/upcoming?limit=15");
+        if (topAiring && topAiring.length) homeData.Trending = dedupeItems(topAiring.map(jikanToMultimediaItem).filter(Boolean));
+        if (topAll && topAll.length) homeData.Popular = dedupeItems(topAll.map(jikanToMultimediaItem).filter(Boolean));
+        if (upcoming && upcoming.length) homeData.Upcoming = dedupeItems(upcoming.map(jikanToMultimediaItem).filter(Boolean));
+        return homeData;
+    }
+
+    async function kitsuHome() {
+        var result = await kitsuGet("/anime?page[limit]=20&sort=-averageRating");
+        var items = result && result.data ? result.data.map(kitsuToMultimediaItem).filter(Boolean) : [];
+        return items.length ? { Popular: dedupeItems(items) } : {};
+    }
+
+    async function hiAnimeHome() {
+        var result = await hiAnimeGet("/api/v2/home");
+        var data = unwrapApiData(result) || {};
+        var homeData = {};
+        ["spotlight", "trending", "topAiring", "mostPopular", "mostFavorite", "latestEpisode", "newAdded", "topUpcoming"].forEach(function (key) {
+            if (Array.isArray(data[key])) {
+                var items = normalizeHiAnimeList(data[key]);
+                if (items.length) homeData[key] = dedupeItems(items);
+            }
+        });
+        return homeData;
+    }
+
+    async function _getHome() {
+        log("home", "Fetching anime home sections");
+        var homeData = {};
+        var providers = providerSequence();
+        for (var i = 0; i < providers.length; i++) {
+            var config = providers[i];
+            try {
+                var next = config.kind === "allanime" ? await allAnimeHome() : config.kind === "jikan" ? await jikanHome() : config.kind === "kitsu" ? await kitsuHome() : await hiAnimeHome();
+                Object.keys(next || {}).forEach(function (key) {
+                    if (!homeData[key] || homeData[key].length < 10) homeData[key] = dedupeItems((homeData[key] || []).concat(next[key] || []));
+                });
+                if (Object.keys(homeData).length >= 4 && getProviderMode() !== "auto") break;
+            } catch (e) { logError("home:" + config.id, e); }
+        }
+        if (Object.keys(homeData).length === 0) throw new Error("HOME_FALLBACK_FAILED");
+        log("home", "Returning " + Object.keys(homeData).length + " anime sections");
+        return homeData;
+    }
+
+    async function allAnimeSearch(query) {
+        var res = await safeQueryGraph({ search: { query: query }, limit: 30, page: 1, translationType: "sub", countryOrigin: "ALL" }, HASHES.mainPage, "GET");
+        if (!res || !res.data || !res.data.shows) return [];
+        return (res.data.shows.edges || []).filter(isAnimeRecord).filter(hasEpisodes).map(function (edge) {
+            return toMultimediaItem(edge, "allanime");
+        }).filter(Boolean);
+    }
+
+    async function hiAnimeSearch(query) {
+        var result = await hiAnimeGet("/api/v2/search?keyword=" + encodeURIComponent(query) + "&page=1");
+        return normalizeHiAnimeList(result);
+    }
+
+    async function kitsuSearch(query) {
+        var result = await kitsuGet("/anime?filter[text]=" + encodeURIComponent(query) + "&page[limit]=25");
+        return result && result.data ? result.data.map(kitsuToMultimediaItem).filter(Boolean) : [];
     }
 
     async function _search(query) {
         if (!query || String(query).trim().length === 0) return [];
-
         log("search", 'Query: "' + query + '"');
         var cacheKey = "search:" + String(query).toLowerCase();
         var cached = getCached(cacheKey, CACHE_TTL.search);
-        if (cached) {
-            log("search", "Cache hit: " + cached.length + " results");
-            return cached;
+        if (cached) return cached;
+        var results = [];
+        var providers = providerSequence();
+        for (var i = 0; i < providers.length; i++) {
+            try {
+                var config = providers[i];
+                var next = config.kind === "allanime" ? await allAnimeSearch(query) : config.kind === "jikan" ? ((await jikanGet("/anime?q=" + encodeURIComponent(query) + "&limit=25&order_by=score&sort=desc")) || []).map(jikanToMultimediaItem).filter(Boolean) : config.kind === "kitsu" ? await kitsuSearch(query) : await hiAnimeSearch(query);
+                results = dedupeItems(results.concat(next || []));
+                if (results.length >= 20 && getProviderMode() !== "auto") break;
+            } catch (e) { logError("search:" + providers[i].id, e); }
         }
-
-        try {
-            var res = await safeQueryGraph({
-                search: { query: query },
-                limit: 30,
-                page: 1,
-                translationType: "sub",
-                countryOrigin: "ALL"
-            }, HASHES.mainPage, "GET");
-
-            if (res && res.data && res.data.shows) {
-                var items = (res.data.shows.edges || [])
-                    .filter(hasEpisodes)
-                    .map(toMultimediaItem)
-                    .filter(Boolean);
-                if (items.length > 0) {
-                    setCached(cacheKey, items);
-                    log("search", "AllAnime returned " + items.length + " results");
-                    return items;
-                }
-            }
-        } catch (e) {
-            logError("searchAllAnime", e);
-        }
-
-        // Jikan fallback.
-        log("search", "AllAnime returned no results — falling back to Jikan");
-        try {
-            var data = await jikanGet("/anime?q=" + encodeURIComponent(query) + "&limit=25&order_by=score&sort=desc");
-            if (data && data.length) {
-                var jikanItems = data.map(jikanToMultimediaItem).filter(Boolean);
-                setCached(cacheKey, jikanItems);
-                return jikanItems;
-            }
-        } catch (e) {
-            logError("searchJikan", e);
-        }
-
-        return [];
+        setCached(cacheKey, results);
+        log("search", "Returning " + results.length + " anime results");
+        return results;
     }
 
     async function _load(url) {
-        log("load", "Loading: " + url);
+        log("load", "Loading: " + String(url).substring(0, 100));
+        var sourcePayload = parseSourceId(url);
+        var providerId = sourcePayload.source || "allanime";
+        var providerIdValue = sourcePayload.id || url;
         var cacheKey = "detail:" + url;
         var cached = getCached(cacheKey, CACHE_TTL.metadata);
         if (cached) {
@@ -950,14 +1228,32 @@
         }
 
         var show = null;
-        var res = await safeQueryGraph({ _id: url }, HASHES.detail, "GET");
-        if (res && res.data && res.data.show) show = res.data.show;
+        if (providerId === "allanime" || providerId === "AllAnime") {
+            var res = await safeQueryGraph({ _id: providerIdValue }, HASHES.detail, "GET");
+            if (res && res.data && res.data.show && isAnimeRecord(res.data.show)) show = res.data.show;
+        } else if (providerId === "hianime") {
+            var hiResult = unwrapApiData(await hiAnimeGet("/api/v2/anime/" + encodeURIComponent(providerIdValue)));
+            if (hiResult && isAnimeRecord(hiResult)) {
+                var hiItemList = normalizeHiAnimeList([hiResult]);
+                if (hiItemList.length) {
+                    var hiItem = hiItemList[0];
+                    var hiEpisodes = unwrapApiData(await hiAnimeGet("/api/v2/episodes/" + encodeURIComponent(providerIdValue)));
+                    var hiEpisodeList = Array.isArray(hiEpisodes) ? hiEpisodes : (hiEpisodes && (hiEpisodes.episodes || hiEpisodes.items)) || [];
+                    hiItem.episodes = hiEpisodeList.map(function (episode, index) {
+                        var epNum = episode.episodeNumber || episode.number || index + 1;
+                        return new Episode({ name: episode.title || "Episode " + epNum, url: sourceId("hianime", episode.id || providerIdValue, { episode: String(epNum), dubStatus: "sub", malId: sourcePayload.malId || null }), season: 1, episode: Number(epNum), description: episode.description || "", posterUrl: hiItem.posterUrl, dubStatus: "subbed", headers: HEADERS });
+                    });
+                    setCached(cacheKey, hiItem);
+                    return hiItem;
+                }
+            }
+        }
 
         // Jikan fallback if AllAnime returned nothing (or the id is a MAL id).
         if (!show) {
-            log("load", "AllAnime returned no detail — trying Jikan for id " + url);
-            var malId = parseInt(url, 10);
-            if (!isNaN(malId)) {
+            log("load", "Primary source returned no detail — trying Jikan/Kitsu");
+            var malId = Number(sourcePayload.malId || (providerId === "jikan" ? providerIdValue : url));
+            if (!isNaN(malId) && malId > 0) {
                 var jikan = await jikanGet("/anime/" + malId + "/full");
                 if (jikan) {
                     var item = jikanToMultimediaItem(jikan);
@@ -966,13 +1262,13 @@
                         for (var ei = 1; ei <= jikan.episodes; ei++) {
                             eps.push(new Episode({
                                 name: "Episode " + ei,
-                                url: JSON.stringify({ hash: String(jikan.mal_id), dubStatus: "sub", episode: String(ei), idMal: jikan.mal_id }),
+                                url: sourceId("jikan", jikan.mal_id, { episode: String(ei), dubStatus: "sub", malId: jikan.mal_id }),
                                 season: 1,
                                 episode: ei,
                                 description: "",
                                 posterUrl: (jikan.images && jikan.images.jpg && jikan.images.jpg.large_image_url) || getPosterFallback(),
                                 runtime: jikan.duration ? parseInt(String(jikan.duration), 10) || 24 : 24,
-                                dubStatus: "sub",
+                                dubStatus: "subbed",
                                 headers: HEADERS
                             }));
                         }
@@ -1023,12 +1319,7 @@
             var aniEp = (aniZip && aniZip.episodes) ? aniZip.episodes[epNum] : null;
             allEpisodes.push(new Episode({
                 name: (aniEp && aniEp.title && (aniEp.title.en || aniEp.title.ja)) || "Episode " + epNum,
-                url: JSON.stringify({
-                    hash: show._id,
-                    dubStatus: "sub",
-                    episode: epNum,
-                    idMal: show.idMal
-                }),
+                url: sourceId("allanime", show._id, { episode: String(epNum), dubStatus: "sub", malId: show.idMal || null }),
                 season: 1,
                 episode: parseInt(epNum, 10),
                 description: (aniEp && aniEp.overview) || "",
@@ -1045,12 +1336,7 @@
             var dubAniEp = (aniZip && aniZip.episodes) ? aniZip.episodes[dubEpNum] : null;
             allEpisodes.push(new Episode({
                 name: (dubAniEp && dubAniEp.title && (dubAniEp.title.en || dubAniEp.title.ja)) || "Episode " + dubEpNum + " (Dub)",
-                url: JSON.stringify({
-                    hash: show._id,
-                    dubStatus: "dub",
-                    episode: dubEpNum,
-                    idMal: show.idMal
-                }),
+                url: sourceId("allanime", show._id, { episode: String(dubEpNum), dubStatus: "dub", malId: show.idMal || null }),
                 season: 1,
                 episode: parseInt(dubEpNum, 10),
                 description: (dubAniEp && dubAniEp.overview) || "",
@@ -1067,7 +1353,7 @@
             for (var s = 1; s <= Math.min(totalEpisodes, 500); s++) {
                 allEpisodes.push(new Episode({
                     name: "Episode " + s,
-                    url: JSON.stringify({ hash: show._id, dubStatus: "sub", episode: String(s), idMal: show.idMal }),
+                    url: sourceId("allanime", show._id, { episode: String(s), dubStatus: "sub", malId: show.idMal || null }),
                     season: 1,
                     episode: s,
                     posterUrl: poster,
@@ -1086,10 +1372,11 @@
                     var mr = rec.mediaRecommendation;
                     recommendations.push(new MultimediaItem({
                         title: (mr.title && (mr.title.english || mr.title.romaji || mr.title.userPreferred)) || "Unknown",
-                        url: mr.id ? String(mr.id) : "",
+                        url: mr.id ? sourceId("anilist", mr.id, { malId: mr.idMal || null }) : "",
                         posterUrl: (mr.coverImage && mr.coverImage.large) || getPosterFallback(),
                         type: "anime",
                         score: mr.averageScore ? mr.averageScore / 10 : 0,
+                        syncData: { source: "anilist", anilistId: mr.id, malId: mr.idMal || null },
                         headers: HEADERS
                     }));
                 }
@@ -1101,14 +1388,56 @@
             for (var l = 0; l < aniMedia.characters.edges.length; l++) {
                 var char = aniMedia.characters.edges[l].node;
                 if (char) {
+                    var va = (char.voiceActors && char.voiceActors[0]) || null;
                     cast.push(new Actor({
                         name: (char.name && char.name.full) || "Unknown",
-                        role: aniMedia.characters.edges[l].role || "",
-                        image: (char.image && char.image.large) || ""
+                        role: (aniMedia.characters.edges[l].role || "Character") + (va ? " (VA: " + ((va.name && va.name.full) || "Unknown") + ")" : ""),
+                        image: (char.image && char.image.large) || (va && va.image && va.image.large) || ""
                     }));
                 }
             }
         }
+
+        // Merge provider tags with AniList tags (drop NSFW/spoiler flagged for adult surfaces).
+        var combinedTags = (genres || []).slice();
+        if (aniMedia && Array.isArray(aniMedia.tags)) {
+            aniMedia.tags.forEach(function (t) {
+                if (t && t.name && t.isMediaSpoiler !== true && combinedTags.indexOf(t.name) === -1) combinedTags.push(t.name);
+            });
+        }
+
+        var trailer = null;
+        if (aniMedia && aniMedia.trailer && aniMedia.trailer.id) {
+            if (aniMedia.trailer.site === "youtube" || !aniMedia.trailer.site) {
+                trailer = new Trailer({
+                    title: "Trailer",
+                    thumbnail: aniMedia.trailer.thumbnail || (poster || ""),
+                    trailerId: aniMedia.trailer.id
+                });
+            } else {
+                trailer = new Trailer({
+                    title: "Trailer",
+                    thumbnail: aniMedia.trailer.thumbnail || (poster || ""),
+                    url: "https://" + aniMedia.trailer.site + ".com/watch?v=" + aniMedia.trailer.id
+                });
+            }
+        }
+
+        var nextAiring = null;
+        if (aniMedia && aniMedia.nextAiringEpisode) {
+            var nxt = aniMedia.nextAiringEpisode;
+            nextAiring = new NextAiring({
+                episode: nxt.episode || 1,
+                airingAt: nxt.airingAt || 0
+            });
+        }
+
+        var syncData = {
+            source: "allanime",
+            allanimeId: show._id,
+            malId: show.idMal || (aniMedia && aniMedia.idMal) || null,
+            anilistId: aniMedia && aniMedia.id ? aniMedia.id : null
+        };
 
         var item = new MultimediaItem({
             title: resolvedTitle,
@@ -1121,9 +1450,12 @@
             score: averageScore ? averageScore / 10 : 0,
             duration: (aniMedia && aniMedia.duration) || 24,
             status: status,
-            tags: genres,
+            tags: combinedTags,
             cast: cast,
             recommendations: recommendations,
+            trailer: trailer,
+            nextAiring: nextAiring,
+            syncData: syncData,
             episodes: allEpisodes,
             headers: HEADERS
         });
@@ -1136,24 +1468,42 @@
     async function _loadStreams(url) {
         log("streams", "Resolving streams for: " + String(url).substring(0, 80));
 
-        var payload;
-        try {
-            payload = JSON.parse(url);
-        } catch (e) {
-            throw new Error("INVALID_EPISODE_URL");
+        var payload = parseSourceId(url);
+        if (!payload || !payload.id) {
+            throw new Error("MISSING_EPISODE_ID");
         }
 
-        if (!payload || !payload.hash) {
-            throw new Error("MISSING_EPISODE_HASH");
-        }
-
-        var episode = String(payload.episode);
+        var source = (payload.source || "allanime").toLowerCase();
+        var episode = String(payload.episode || "");
         var dubStatus = payload.dubStatus || "sub";
-        var showId = payload.hash;
+        var showId = payload.id;
 
-        var cacheKey = "streams:" + showId + ":" + dubStatus + ":" + episode;
+        var cacheKey = "streams:" + source + ":" + showId + ":" + dubStatus + ":" + episode;
         if (wasRecentlyFailed(cacheKey)) {
             throw new Error("RECENTLY_FAILED");
+        }
+
+        // HiAnime has its own per-episode source endpoint. Jikan/Kitsu don't carry streams, so
+        // they fall through to the Jikan-based AllAnime id resolution as a last resort.
+        if (source === "hianime") {
+            var hiSources = await _loadStreamsFromHiAnime(showId, episode, dubStatus);
+            if (hiSources && hiSources.length) {
+                setCached(cacheKey, hiSources);
+                return hiSources;
+            }
+            setCachedFailure(cacheKey);
+            throw new Error("NO_PLAYABLE_STREAMS");
+        }
+
+        if (source === "jikan" || source === "kitsu" || source === "anilist") {
+            // Re-route MAL/AniList ids to AllAnime by title when possible.
+            var routed = await _loadStreamsFromMetadataId(source, showId, episode, dubStatus);
+            if (routed && routed.length) {
+                setCached(cacheKey, routed);
+                return routed;
+            }
+            setCachedFailure(cacheKey);
+            throw new Error("NO_PLAYABLE_STREAMS");
         }
 
         var variables = {
@@ -1245,6 +1595,77 @@
         setCached(cacheKey, streamResults);
         log("streams", "Returning " + streamResults.length + " streams");
         return streamResults;
+    }
+
+    async function _loadStreamsFromHiAnime(animeId, episode, dubStatus) {
+        if (!getHiAnimeBase()) return [];
+        var ep = await hiAnimeGet("/api/v2/episodes/" + encodeURIComponent(animeId));
+        var epList = Array.isArray(ep) ? ep : (ep && (ep.episodes || ep.items)) || [];
+        if (!epList.length) return [];
+        var epNum = parseInt(episode, 10);
+        var match = null;
+        for (var i = 0; i < epList.length; i++) {
+            var e = epList[i];
+            if (!e) continue;
+            if (Number(e.episodeNumber) === epNum || Number(e.number) === epNum) { match = e; break; }
+        }
+        if (!match && epList[epNum - 1]) match = epList[epNum - 1];
+        if (!match) return [];
+
+        var sources = await hiAnimeGet("/api/v2/sources?animeId=" + encodeURIComponent(animeId) + "&episodeId=" + encodeURIComponent(match.id || "") + "&type=" + encodeURIComponent(dubStatus));
+        var sourceList = Array.isArray(sources) ? sources : (sources && (sources.sources || sources.items || sources.data)) || [];
+        if (!sourceList.length) return [];
+
+        var streamResults = [];
+        for (var j = 0; j < sourceList.length; j++) {
+            var s = sourceList[j];
+            if (!s) continue;
+            var streamUrl = s.url || s.link || s.file;
+            if (!streamUrl) continue;
+            if (isPlayableMediaUrl(streamUrl)) {
+                streamResults.push(new StreamResult({
+                    url: streamUrl,
+                    source: "HiAnime / " + (s.server || s.name || s.source || "Direct"),
+                    quality: qualityFromText(String(s.quality || "")) || "Auto",
+                    headers: HEADERS,
+                    subtitles: []
+                }));
+            } else {
+                await resolveEmbeddedSource(streamUrl, "HiAnime / " + (s.server || s.name || s.source || "Embed"), [], streamResults, "https://hianime.to");
+            }
+        }
+        return streamResults;
+    }
+
+    async function _loadStreamsFromMetadataId(source, id, episode, dubStatus) {
+        // Resolve a MAL/AniList/Kitsu id to an AllAnime show id via AniList search.
+        var media = null;
+        if (source === "jikan") media = await getAniListMedia({ idMal: parseInt(id, 10) });
+        else if (source === "anilist") media = await getAniListMedia({ id: parseInt(id, 10) });
+
+        if (!media) return [];
+        var title = (media.title && (media.title.english || media.title.romaji || media.title.userPreferred)) || "";
+        if (!title) return [];
+
+        var res = await safeQueryGraph({ search: { query: title }, limit: 10, page: 1, translationType: dubStatus === "dub" ? "dub" : "sub", countryOrigin: "ALL" }, HASHES.mainPage, "GET");
+        var edges = (res && res.data && res.data.shows && res.data.shows.edges) || [];
+        var pick = null;
+        for (var i = 0; i < edges.length; i++) {
+            if (edges[i] && edges[i]._id) { pick = edges[i]; break; }
+        }
+        if (!pick) return [];
+
+        var variables = {
+            showId: pick._id,
+            episodeString: String(episode || "1"),
+            translationType: dubStatus === "dub" ? "dub" : "sub"
+        };
+        var streamRes = await safeQueryGraph(variables, HASHES.server, "GET");
+        if (!streamRes || !streamRes.data || !streamRes.data.episode) {
+            streamRes = await safeQueryGraph(variables, HASHES.server, "POST");
+        }
+        if (!streamRes || !streamRes.data || !streamRes.data.episode) return [];
+        return await resolveSourceEntries(streamRes.data.episode.sourceUrls, []);
     }
 
     // ============================================================================
