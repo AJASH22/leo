@@ -1,0 +1,9 @@
+{
+  "name": "Miruro",
+  "packageName": "com.miruro.repo",
+  "description": "Miruro anime plugin repository for SkyStream — AllAnime + Jikan + AniList multi-source catalog with multi-provider stream resolution.",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/AJASH22/leo/main/dist/plugins.json"
+  ]
+}

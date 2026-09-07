@@ -1,0 +1,45 @@
+name: Build and Deploy Repository
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'dist/**'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Bundle plugins and publish repo index
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install skystream CLI
+        run: npm install -g skystream-cli
+
+      - name: Validate plugins
+        run: skystream validate
+
+      - name: Bundle and deploy
+        run: skystream deploy -u https://raw.githubusercontent.com/${{ github.repository }}/main
+
+      - name: Commit dist artifacts
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: automated deploy [skip ci]"
+          file_pattern: "*.json *.md dist/**"

@@ -1,0 +1,20 @@
+[
+  {
+    "packageName": "com.miruro",
+    "name": "Miruro",
+    "version": 5,
+    "baseUrl": "https://allanime.to",
+    "description": "Miruro — premium anime streaming with AllAnime + Jikan + AniList catalog enrichment and multi-provider stream resolution.",
+    "authors": [
+      "ajash"
+    ],
+    "languages": [
+      "en",
+      "ja"
+    ],
+    "categories": [
+      "Anime"
+    ],
+    "url": "https://raw.githubusercontent.com/AJASH22/leo/main/dist/com.miruro.sky"
+  }
+]

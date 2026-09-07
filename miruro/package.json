@@ -1,0 +1,18 @@
+{
+  "name": "miruro-skystream-repo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Miruro SkyStream plugin repository.",
+  "scripts": {
+    "deploy": "skystream deploy -u https://raw.githubusercontent.com/AJASH22/leo/main/",
+    "validate": "skystream validate",
+    "test:home": "skystream test -p miruro -f getHome",
+    "test:search": "skystream test -p miruro -f search -q \"naruto\"",
+    "test:load": "skystream test -p miruro -f load -q \"<allanime-show-id>\"",
+    "test:streams": "skystream test -p miruro -f loadStreams -q '{\"hash\":\"<id>\",\"episode\":\"1\",\"dubStatus\":\"sub\"}'",
+    "test": "skystream validate"
+  },
+  "devDependencies": {
+    "skystream-extractors": "latest"
+  }
+}
