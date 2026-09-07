@@ -2,7 +2,7 @@
   {
     "packageName": "com.miruro",
     "name": "Miruro",
-    "version": "5.0.0",
+    "version": 5,
     "baseUrl": "https://allanime.to",
     "description": "Miruro - Premium anime streaming with comprehensive catalog, multi-provider support, and high-quality streams from multiple sources",
     "authors": [
@@ -15,7 +15,6 @@
     "categories": [
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/AJASH22/leo/main/dist/com.miruro.sky",
     "catalogVersion": 3,
     "providers": [
       {
@@ -26,6 +25,7 @@
         "id": "AllManga",
         "baseUrl": "https://allmanga.to"
       }
-    ]
+    ],
+    "url": "https://raw.githubusercontent.com/AJASH22/leo/main/dist/com.miruro.sky"
   }
 ]
