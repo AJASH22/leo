@@ -2,9 +2,9 @@
   {
     "packageName": "com.miruro",
     "name": "Miruro",
-    "version": 1,
+    "version": "1.1.0",
     "baseUrl": "https://www.miruro.bz",
-    "description": "Miruro - Anime streaming",
+    "description": "Miruro - Anime streaming with comprehensive anime catalog and premium metadata",
     "authors": [
       "ajash"
     ],
@@ -15,6 +15,7 @@
     "categories": [
       "Anime"
     ],
-    "url": "https://raw.githubusercontent.com/AJASH22/leo/main/dist/com.miruro.sky"
+    "url": "https://raw.githubusercontent.com/AJASH22/leo/main/dist/com.miruro.sky",
+    "catalogVersion": 2
   }
 ]

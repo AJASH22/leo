@@ -1,7 +1,7 @@
 {
   "name": "my-repo",
-  "version": "1.0.0",
-  "description": "SkyStream plugins repository",
+  "version": 3,
+  "description": "SkyStream plugins repository with Miruro anime streaming",
   "private": true,
   "scripts": {
     "deploy": "skystream deploy -u https://raw.githubusercontent.com/USER_NAME/my-repo/main/"
