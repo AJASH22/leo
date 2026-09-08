@@ -29,7 +29,8 @@ SkyStream
   ├─ load(source-aware item id)
   │    ├─ AllAnime detail + AniList + AniZip
   │    ├─ HiAnime detail + episodes
-  │    └─ Jikan/Kitsu fallback detail
+  │    ├─ Kitsu detail + paginated episodes + mappings
+  │    └─ Jikan detail + provider episode records
   │
   └─ loadStreams(source-aware episode id)
        ├─ HiAnime source endpoint

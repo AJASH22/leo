@@ -2,7 +2,8 @@
   {
     "packageName": "com.miruro",
     "name": "Miruro",
-    "version": 6,
+    "version": 7,
+    "releaseVersion": "1.1",
     "baseUrl": "https://allanime.to",
     "description": "Miruro — anime-only multi-source SkyStream plugin. Catalog: AllAnime + Jikan + Kitsu + optional self-hosted HiAnime API. Metadata: AniList + AniZip. Streams: provider adapters + bundled extractors + validated HLS/DASH/MP4.",
     "authors": [

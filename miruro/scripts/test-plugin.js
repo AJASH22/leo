@@ -22,7 +22,13 @@ check("HiAnime adapter exists", /_loadStreamsFromHiAnime/.test(source));
 check("extractor registry hook wired", /SkyStreamExtractors/.test(source) && /resolveWithBundledExtractor/.test(source));
 check("iframe URLs are not treated as media", /isPlayableMediaUrl/.test(source) && /NO_PLAYABLE_STREAMS/.test(source));
 check("richer AniList metadata", /nextAiringEpisode/.test(source) && /trailer/.test(source) && /voiceActors/.test(source));
-check("manifest version bumped", /\"version\"\s*:\s*6/.test(fs.readFileSync(path.join(__dirname, "..", "miruro", "plugin.json"), "utf8")));
+check("manifest version bumped", /\"version\"\s*:\s*7/.test(fs.readFileSync(path.join(__dirname, "..", "miruro", "plugin.json"), "utf8")));
+check("public release version is dotted", /\"releaseVersion\"\s*:\s*\"1\.1\"/.test(fs.readFileSync(path.join(__dirname, "..", "miruro", "plugin.json"), "utf8")));
+check("Kitsu uses supported page size", !/page\\\[limit\\\]=25/.test(source));
+check("Kitsu detail route exists", source.includes('providerId === "kitsu"') && source.includes('/episodes?page%5Blimit%5D=20'));
+check("Kitsu stream routing exists", /source === "kitsu"/.test(source) && /kitsuTitle/.test(source));
+check("request timeout guard exists", /function withTimeout/.test(source) && /_TIMEOUT/.test(source));
+check("HLS extractor recognizes m3u8", source.includes(".m3u8(?:[?#]|$)"));
 
 // Keep one executable assertion for the envelope shape used by test fixtures.
 const envelope = { v: 2, source: "allanime", id: "show-id", episode: "1", dubStatus: "sub" };
