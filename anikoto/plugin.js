@@ -16,17 +16,13 @@
 
     /* ---------- helpers ---------- */
     async function fetchJSON(url, opts = {}) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 10000);
         try {
-            const res = await fetch(url, { ...opts, signal: controller.signal, headers: { ...(opts.headers || {}), "Accept": "application/json" } });
-            clearTimeout(timer);
+            const res = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), "Accept": "application/json" } });
             if (!res.ok) throw new Error("HTTP " + res.status);
             const text = await res.text();
             if (!text || text.trim().length < 3) throw new Error("empty response");
             return JSON.parse(text);
         } catch (e) {
-            clearTimeout(timer);
             throw e;
         }
     }
