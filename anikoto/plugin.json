@@ -1,0 +1,10 @@
+{
+  "packageName": "com.anikoto.skystream",
+  "name": "anikoto",
+  "version": 2,
+  "baseUrl": "https://anikototv.to",
+  "description": "Anikoto SkyStream plugin - real catalog from anikoto.tv",
+  "authors": ["anikoto"],
+  "languages": ["en"],
+  "categories": ["Anime", "Streaming"]
+}
