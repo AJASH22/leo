@@ -1,0 +1,9 @@
+{
+  "name": "leo",
+  "packageName": "com.ajash.repo",
+  "description": "SkyStream plugins repository",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/AJASH22/leo/main/dist/plugins.json"
+  ]
+}
