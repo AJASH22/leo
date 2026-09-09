@@ -1,1 +1,20 @@
-{"plugins":[{"packageName":"com.anikoto.skystream","name":"anikoto","version":2,"baseUrl":"https://anikototv.to","path":"anikoto/plugin.js","url":"https://raw.githubusercontent.com/AJASH22/leo/main/anikoto/plugin.js","description":"Anikoto SkyStream plugin - real catalog from anikoto.tv"}]}
+[
+  {
+    "packageName": "com.anikoto.skystream",
+    "name": "anikoto",
+    "version": 2,
+    "baseUrl": "https://anikototv.to",
+    "description": "Anikoto SkyStream plugin - real catalog from anikoto.tv",
+    "authors": [
+      "anikoto"
+    ],
+    "languages": [
+      "en"
+    ],
+    "categories": [
+      "Anime",
+      "Streaming"
+    ],
+    "url": "https://raw.githubusercontent.com/AJASH22/leo/main/dist/com.anikoto.skystream.sky"
+  }
+]
