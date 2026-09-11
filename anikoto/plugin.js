@@ -294,23 +294,8 @@
                 if (completed.length) data["Completed"] = completed;
             } catch (_) {}
 
-            // If no sections were added, treat as error to surface issue
             if (Object.keys(data).length === 0) {
-                // Add a test section to verify the plugin is working
-                data["Test Section"] = [
-                    new MultimediaItem({
-                        title: "Test Item",
-                        url: SITE + "/info?id=test",
-                        posterUrl: undefined,
-                        type: "unknown",
-                        description: "This is a test section to verify plugin loading",
-                        year: undefined,
-                        score: undefined,
-                        status: undefined,
-                        duration: undefined,
-                        syncData: { source_id: "test" }
-                    })
-                ];
+                return cb({ success: false, errorCode: "GETHOME_ERROR", message: "No home sections could be loaded" });
             }
             cb({ success: true, data: data });
         } catch (e) {
