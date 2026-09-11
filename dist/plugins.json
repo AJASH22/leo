@@ -2,7 +2,7 @@
   {
     "packageName": "com.anikoto.skystream",
     "name": "anikoto",
-    "version": 2,
+    "version": 3,
     "baseUrl": "https://anikototv.to",
     "description": "Anikoto SkyStream plugin - real catalog from anikoto.tv",
     "authors": [
@@ -16,24 +16,5 @@
       "Streaming"
     ],
     "url": "https://raw.githubusercontent.com/AJASH22/leo/main/dist/com.anikoto.skystream.sky"
-  },
-  {
-    "packageName": "com.miruro",
-    "name": "Miruro",
-    "version": 7,
-    "releaseVersion": "1.1",
-    "baseUrl": "https://allanime.to",
-    "description": "Miruro — anime-only multi-source SkyStream plugin. Catalog: AllAnime + Jikan + Kitsu + optional self-hosted HiAnime API. Metadata: AniList + AniZip. Streams: provider adapters + bundled extractors + validated HLS/DASH/MP4.",
-    "authors": [
-      "ajash"
-    ],
-    "languages": [
-      "en",
-      "ja"
-    ],
-    "categories": [
-      "Anime"
-    ],
-    "url": "https://raw.githubusercontent.com/AJASH22/leo/main/dist/com.miruro.sky"
   }
 ]
