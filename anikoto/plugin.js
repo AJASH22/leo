@@ -27,7 +27,7 @@
     const API_BASE = (typeof window !== 'undefined' && window.API_BASE) ||
                      (typeof self !== 'undefined' && self.API_BASE) ||
                      "https://anikoto-api-6643.onrender.com/api";  // Live AniKotoAPI instance
-    const SITE = "https://anikototv.to";
+    const SITE = "https://anikoto.cz";
 
     /* ---------- helpers ---------- */
     async function fetchJSON(url, opts = {}) {
@@ -387,6 +387,14 @@
                     }
                     item.episodes = episodes;
                 }
+            } else if (data.episodes === "?") {
+                // For specials/movies with unknown episode count, treat as 1 episode
+                item.episodes = [{
+                    id: `${data.slug}-episode-1`,
+                    number: 1,
+                    title: `Episode 1`,
+                    url: `${SITE}/watch/${data.slug}?ep=1`
+                }];
             } else {
                 item.episodes = [];
             }

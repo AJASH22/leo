@@ -2,7 +2,7 @@
   "packageName": "com.anikoto.skystream",
   "name": "anikoto",
   "version": 3,
-  "baseUrl": "https://anikototv.to",
+  "baseUrl": "https://anikoto.cz",
   "description": "Anikoto SkyStream plugin - real catalog from anikoto.tv",
   "authors": ["anikoto"],
   "languages": ["en"],
