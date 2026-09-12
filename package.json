@@ -8,5 +8,8 @@
   },
   "devDependencies": {
     "skystream-extractors": "latest"
+  },
+  "dependencies": {
+    "node-fetch": "^2.0.0"
   }
 }
