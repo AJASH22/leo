@@ -312,9 +312,19 @@
             // Use the verified API endpoint
             const url = API_BASE + "/search?keyword=" + encodeURIComponent(query) + "&page=1";
             const response = await fetchJSON(url);
-            // API returns { success: true, results: [...] }
-            if (response && response.success && Array.isArray(response.results)) {
-                const items = response.results.map(anime => {
+            // API returns { success: true, results: { data: [...] } } or sometimes { success: true, results: [...] }
+            let items = [];
+            if (response && response.success) {
+                if (Array.isArray(response.results)) {
+                    items = response.results;
+                } else if (response.results && Array.isArray(response.results.data)) {
+                    items = response.results.data;
+                }
+            }
+            if (items.length === 0) {
+                cb({ success: true, data: [], message: "No results found" });
+            } else {
+                const mapped = items.map(anime => {
                     return new MultimediaItem({
                         title: anime.title || "Unknown",
                         url: SITE + "/info?id=" + encodeURIComponent(anime.slug || ""),
@@ -328,9 +338,7 @@
                         syncData: anime.slug ? { source_id: anime.slug } : undefined,
                     });
                 });
-                cb({ success: true, data: items });
-            } else {
-                cb({ success: true, data: [], message: "No results found" });
+                cb({ success: true, data: mapped });
             }
         } catch (e) {
             cb({ success: false, errorCode: "SEARCH_ERROR", message: String(e) });
@@ -340,19 +348,21 @@
     /* ---------- load ---------- */
     async function load(url, cb) {
         try {
-            // url comes from item.url = SITE + /info?name=...
+            // url comes from item.url = SITE + /info?id=<slug>
             let slug = url;
             try {
                 const u = new URL(url);
-                const q = u.searchParams.get("name");
-                if (q) slug = q;
+                const q = u.searchParams.get("id");
+                if (q) {
+                    // Extract only the anime slug (first part before any "/")
+                    slug = q.split("/")[0];
+                }
             } catch (_) {}
-            // Try direct info fetch
+            // Try direct info fetch using the API endpoint
             let data;
             try {
                 data = await fetchInfo(slug);
             } catch (e1) {
-                // If direct fails try extracting from site (not scraping due to reliability limits)
                 return cb({ success: false, errorCode: "LOAD_ERROR", message: "Anikoto info endpoint unavailable for: " + slug });
             }
             if (!data || !data.title) {
@@ -362,12 +372,24 @@
             const item = buildItemFromInfo(data);
             if (!item) return cb({ success: false, errorCode: "LOAD_PARSE_ERROR", message: "Failed to parse info" });
 
-            // Episodes: /info returns episodes="?" (unknown) — do NOT invent.
-            // If site or endpoint provided episode array, we'd parse; currently unavailable.
-            item.episodes = []; // explicitly empty — no fake episodes
-
-            // For movie representation: SkyStream expects season=1 episode=1 if needed; we leave episodes empty
-            // and rely on item.type="movie".
+            // Episodes: if the API provided episode count, build episodes array
+            if (data.episodes && data.episodes !== "?") {
+                const epNum = parseInt(data.episodes);
+                if (!isNaN(epNum) && epNum > 0) {
+                    const episodes = [];
+                    for (let i = 1; i <= epNum; i++) {
+                        episodes.push({
+                            id: `${data.slug}-episode-${i}`,
+                            number: i,
+                            title: `Episode ${i}`,
+                            url: `${SITE}/watch/${data.slug}?ep=${i}`
+                        });
+                    }
+                    item.episodes = episodes;
+                }
+            } else {
+                item.episodes = [];
+            }
 
             cb({ success: true, data: item });
         } catch (e) {
@@ -391,6 +413,11 @@
                 // Path is like /watch/<slug>
                 if (pathParts.length >= 3 && pathParts[1] === "watch") {
                     slug = pathParts[2];
+                    // Decode the slug and extract anime slug (part before first "/")
+                    const decodedSlug = decodeURIComponent(slug);
+                    const animeSlugPart = decodedSlug.split("/")[0];
+                    // Re-encode for API call
+                    slug = encodeURIComponent(animeSlugPart);
                 }
                 // Get episode from query param
                 const epParam = u.searchParams.get("ep");
@@ -402,6 +429,11 @@
                 const match = url.match(/\/watch\/([^/?]+)(?:[?&]ep=(\d+))?/);
                 if (match) {
                     slug = match[1];
+                    // Decode the slug and extract anime slug (part before first "/")
+                    const decodedSlug = decodeURIComponent(slug);
+                    const animeSlugPart = decodedSlug.split("/")[0];
+                    // Re-encode for API call
+                    slug = encodeURIComponent(animeSlugPart);
                     if (match[2]) episodeNum = parseInt(match[2]);
                 }
             }
@@ -412,18 +444,42 @@
 
             // First, get episode list to find the link ID for this episode
             const episodesResponse = await fetchJSON(API_BASE + "/episodes/" + encodeURIComponent(slug));
-            if (!episodesResponse || !episodesResponse.success || !Array.isArray(episodesResponse.results)) {
+            if (!episodesResponse || !episodesResponse.success) {
+                return cb({ success: false, errorCode: "STREAM_ERROR", message: "Failed to fetch episode list" });
+            }
+            const episodes = episodesResponse.results && episodesResponse.results.episodes;
+            if (!Array.isArray(episodes)) {
                 return cb({ success: false, errorCode: "STREAM_ERROR", message: "Failed to fetch episode list" });
             }
 
-            const episodes = episodesResponse.results;
-            const episode = episodes.find(ep => ep.number === episodeNum);
+            const episode = episodes.find(ep => ep.episode_no === episodeNum);
             if (!episode) {
                 return cb({ success: false, errorCode: "STREAM_ERROR", message: `Episode ${episodeNum} not found` });
             }
 
+            // Get server IDs from episode, then fetch servers to get link ID
+            if (!episode.server_ids) {
+                return cb({ success: false, errorCode: "STREAM_ERROR", message: "Episode missing server IDs" });
+            }
+
+            const serversResponse = await fetchJSON(API_BASE + "/servers?ids=" + encodeURIComponent(episode.server_ids));
+            if (!serversResponse || !serversResponse.success || !serversResponse.results) {
+                return cb({ success: false, errorCode: "STREAM_ERROR", message: "Failed to fetch server list" });
+            }
+
+            const servers = serversResponse.results;
+            if (!Array.isArray(servers) || servers.length === 0) {
+                return cb({ success: false, errorCode: "STREAM_ERROR", message: "No servers found" });
+            }
+
+            // Use the first server's link_id (could be improved to let user select quality/server)
+            const linkId = servers[0].link_id;
+            if (!linkId) {
+                return cb({ success: false, errorCode: "STREAM_ERROR", message: "Server missing link ID" });
+            }
+
             // Now get stream info for this episode's link ID
-            const streamResponse = await fetchJSON(API_BASE + "/stream?id=" + encodeURIComponent(episode.link_id));
+            const streamResponse = await fetchJSON(API_BASE + "/stream?id=" + encodeURIComponent(linkId));
             if (!streamResponse || !streamResponse.success || !streamResponse.results) {
                 return cb({ success: false, errorCode: "STREAM_ERROR", message: "Failed to fetch stream info" });
             }
