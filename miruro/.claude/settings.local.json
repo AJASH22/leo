@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(skystream test *)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "PowerShell(curl *)"
-    ]
-  }
-}

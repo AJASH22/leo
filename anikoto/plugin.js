@@ -1,28 +1,22 @@
-(function() {
+﻿(function() {
     /*
-     * Anikoto SkyStream plugin — real data only.
+     * Anikoto SkyStream plugin â€” real data only.
      * Verified sources (2026-09-11):
-     *   • https://anikoto-api-6643.onrender.com/api/info?id=<slug>  → WORKING (poster, metadata)
-     *   • https://anikoto-api-6643.onrender.com/api/search?keyword=<query> → WORKING (search)
-     *   • https://anikoto-api-6643.onrender.com/api/episodes/:id → WORKING (episodes with server_ids)
-     *   • https://anikoto-api-6643.onrender.com/api/servers?ids=<server_ids> → WORKING (server list)
-     *   • https://anikoto-api-6643.onrender.com/api/stream?id=<link_id> → WORKING (stream URL)
+     *   â€¢ https://anikoto-api-6643.onrender.com/api/info?id=<slug>  â†’ WORKING (poster, metadata)
+     *   â€¢ https://anikoto-api-6643.onrender.com/api/search?keyword=<query> â†’ WORKING (search)
+     *   â€¢ https://anikoto-api-6643.onrender.com/api/episodes/:id â†’ WORKING (episodes with server_ids)
+     *   â€¢ https://anikoto-api-6643.onrender.com/api/servers?ids=<server_ids> â†’ WORKING (server list)
+     *   â€¢ https://anikoto-api-6643.onrender.com/api/stream?id=<link_id> â†’ WORKING (stream URL)
      *
-     * No Miruro. No fake fallback. No placeholder posters.
      */
-    "use strict";
-
-    // Fetch polyfill for Node.js environments where fetch is not globally available
-    if (typeof fetch === 'undefined') {
-        try {
-            const fetch = require('node-fetch');
-            global.fetch = fetch;
-            global.Headers = require('node-fetch').Headers;
-        } catch (e) {
-            // If we can't load node-fetch, we'll let the original error propagate when fetch is actually called.
-        }
+    "use strict";    
+function getRuntimeFetch() {
+    const f = globalThis.fetch;
+    if (typeof f !== "function") {
+        throw new Error("SkyStream runtime does not provide fetch in this environment");
     }
-
+    return f;
+}
     // API Base URL - can be overridden by setting window.API_BASE before plugin loads
     const API_BASE = (typeof window !== 'undefined' && window.API_BASE) ||
                      (typeof self !== 'undefined' && self.API_BASE) ||
@@ -32,7 +26,7 @@
     /* ---------- helpers ---------- */
     async function fetchJSON(url, opts = {}) {
         try {
-            const res = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), "Accept": "application/json" } });
+            const res = await runtimeFetch(url, { ...opts, headers: { ...(opts.headers || {}), "Accept": "application/json" } });
             if (!res.ok) throw new Error("HTTP " + res.status);
             const text = await res.text();
             if (!text || text.trim().length < 3) throw new Error("empty response");
@@ -480,43 +474,59 @@
                 return cb({ success: false, errorCode: "STREAM_ERROR", message: "No servers found" });
             }
 
-            // Use the first server's link_id (could be improved to let user select quality/server)
-            const linkId = servers[0].link_id;
-            if (!linkId) {
-                return cb({ success: false, errorCode: "STREAM_ERROR", message: "Server missing link ID" });
-            }
+            // Try each server and collect all working streams
+            const streamResults = [];
+            let lastError = null;
 
-            // Now get stream info for this episode's link ID
-            const streamResponse = await fetchJSON(API_BASE + "/stream?id=" + encodeURIComponent(linkId));
-            if (!streamResponse || !streamResponse.success || !streamResponse.results) {
-                return cb({ success: false, errorCode: "STREAM_ERROR", message: "Failed to fetch stream info" });
-            }
+            for (const server of servers) {
+                if (!server || !server.link_id) {
+                    continue;
+                }
 
-            const streamData = streamResponse.results;
-            if (!streamData.url) {
-                return cb({ success: true, data: [], message: "No stream URL available" });
-            }
-
-            // Build StreamResult according to SkyStream specification
-            const streamResult = new StreamResult({
-                url: streamData.url,
-                headers: {}, // No special headers needed based on API inspection
-                // Optional: add quality if available
-                ...(streamData.type ? { quality: streamData.type.toUpperCase() } : {}),
-                // Optional: add skip data for intros/outros
-                ...(streamData.skipData ? {
-                    intro: {
-                        start: streamData.skipData.intro_start || 0,
-                        end: streamData.skipData.intro_end || 0
-                    },
-                    outro: {
-                        start: streamData.skipData.outro_start || 0,
-                        end: streamData.skipData.outro_end || 0
+                try {
+                    const streamResponse = await fetchJSON(API_BASE + "/stream?id=" + encodeURIComponent(server.link_id));
+                    if (!streamResponse || !streamResponse.success || !streamResponse.results) {
+                        lastError = new Error("Failed to fetch stream info");
+                        continue;
                     }
-                } : {})
-            });
 
-            cb({ success: true, data: [streamResult] });
+                    const streamData = streamResponse.results;
+                    if (!streamData.url) {
+                        lastError = new Error("No stream URL available");
+                        continue;
+                    }
+
+                    // Build StreamResult according to SkyStream specification
+                    const streamResult = new StreamResult({
+                        url: streamData.url,
+                        headers: streamData.headers || {}, // Preserve headers when supplied
+                        // Optional: add quality if available
+                        ...(streamData.type ? { quality: streamData.type.toUpperCase() } : {}),
+                        // Optional: add skip data for intros/outros
+                        ...(streamData.skipData ? {
+                            intro: {
+                                start: streamData.skipData.intro_start || 0,
+                                end: streamData.skipData.intro_end || 0
+                            },
+                            outro: {
+                                start: streamData.skipData.outro_start || 0,
+                                end: streamData.skipData.outro_end || 0
+                            }
+                        } : {})
+                    });
+
+                    streamResults.push(streamResult);
+                } catch (error) {
+                    lastError = error;
+                    continue; // Try next server
+                }
+            }
+
+            if (streamResults.length === 0) {
+                return cb({ success: false, errorCode: "STREAM_ERROR", message: lastError ? lastError.message : "No working streams found" });
+            }
+
+            cb({ success: true, data: streamResults });
         } catch (e) {
             cb({ success: false, errorCode: "STREAM_ERROR", message: String(e) });
         }
@@ -527,3 +537,5 @@
     globalThis.load = load;
     globalThis.loadStreams = loadStreams;
 })();
+
+

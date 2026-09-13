@@ -1,15 +1,13 @@
-{
+﻿{
   "name": "my-repo",
   "version": 3,
-  "description": "SkyStream plugins repository with Miruro anime streaming",
+  "description": "SkyStream plugins repository with AniKoto",
   "private": true,
   "scripts": {
     "deploy": "skystream deploy -u https://raw.githubusercontent.com/AJASH22/leo/main/"
   },
   "devDependencies": {
     "skystream-extractors": "latest"
-  },
-  "dependencies": {
-    "node-fetch": "^2.0.0"
   }
 }
+

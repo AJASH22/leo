@@ -1,8 +1,0 @@
-node_modules/
-miruro/.build/
-*.log
-.env
-package-lock.json
-.DS_Store
-.vscode/
-.idea/
