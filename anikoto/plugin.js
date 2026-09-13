@@ -126,18 +126,6 @@ function getRuntimeFetch() {
         try {
             const data = {};
 
-            // Latest Episodes / Currently Airing from /schedule
-            try {
-                const scheduleResponse = await fetchJSON(API_BASE + "/schedule?time=" + new Date().toISOString().split("T")[0]);
-                const scheduleItems = scheduleResponse && scheduleResponse.results ? scheduleResponse.results : [];
-                const scheduleItemsArray = Array.isArray(scheduleItems) ? scheduleItems : Object.values(scheduleItems || {});
-                const latest = scheduleItemsArray
-                    .map(e => buildItemFromScheduleEntry(e))
-                    .filter(Boolean)
-                    .slice(0, 12);
-                if (latest.length) data["Latest Episodes"] = latest;
-            } catch (_) {}
-
             // Trending
             try {
                 const trendingResponse = await fetchJSON(API_BASE + "/trending");
@@ -166,7 +154,7 @@ function getRuntimeFetch() {
             // Popular / Most Popular
             try {
                 const popularResponse = await fetchJSON(API_BASE + "/most-popular?page=1");
-                const popularItems = popularResponse && popularResponse.results ? popularResponse.results : [];
+                const popularItems = popularResponse && popularResponse.results ? (Array.isArray(popularResponse.results) ? popularResponse.results : (Array.isArray(popularResponse.results.data) ? popularResponse.results.data : [])) : [];
                 const popular = Array.isArray(popularItems)
                     ? popularItems.map(anime => {
                         return new MultimediaItem({
@@ -191,7 +179,7 @@ function getRuntimeFetch() {
             // New Releases
             try {
                 const newReleaseResponse = await fetchJSON(API_BASE + "/new-release?page=1");
-                const newReleaseItems = newReleaseResponse && newReleaseResponse.results ? newReleaseResponse.results : [];
+                const newReleaseItems = newReleaseResponse && newReleaseResponse.results ? (Array.isArray(newReleaseResponse.results) ? newReleaseResponse.results : (Array.isArray(newReleaseResponse.results.data) ? newReleaseResponse.results.data : [])) : [];
                 const newReleases = Array.isArray(newReleaseItems)
                     ? newReleaseItems.map(anime => {
                         return new MultimediaItem({
@@ -216,7 +204,7 @@ function getRuntimeFetch() {
             // Recently Updated / Recently Added
             try {
                 const recentlyAddedResponse = await fetchJSON(API_BASE + "/newly-added?page=1");
-                const recentlyAddedItems = recentlyAddedResponse && recentlyAddedResponse.results ? recentlyAddedResponse.results : [];
+                const recentlyAddedItems = recentlyAddedResponse && recentlyAddedResponse.results ? (Array.isArray(recentlyAddedResponse.results) ? recentlyAddedResponse.results : (Array.isArray(recentlyAddedResponse.results.data) ? recentlyAddedResponse.results.data : [])) : [];
                 const recentlyUpdated = Array.isArray(recentlyAddedItems)
                     ? recentlyAddedItems.map(anime => {
                         return new MultimediaItem({
@@ -537,5 +525,7 @@ function getRuntimeFetch() {
     globalThis.load = load;
     globalThis.loadStreams = loadStreams;
 })();
+
+
 
 
