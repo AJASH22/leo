@@ -3,3 +3,5 @@ node_modules/
 *.log
 .env
 package-lock.json
+
+/anikoto/settings.local.json
