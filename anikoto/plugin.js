@@ -1,532 +1,167 @@
-﻿(function() {
-    /*
-     * Anikoto SkyStream plugin â€” real data only.
-     * Verified sources (2026-09-11):
-     *   â€¢ https://anikoto-api-6643.onrender.com/api/info?id=<slug>  â†’ WORKING (poster, metadata)
-     *   â€¢ https://anikoto-api-6643.onrender.com/api/search?keyword=<query> â†’ WORKING (search)
-     *   â€¢ https://anikoto-api-6643.onrender.com/api/episodes/:id â†’ WORKING (episodes with server_ids)
-     *   â€¢ https://anikoto-api-6643.onrender.com/api/servers?ids=<server_ids> â†’ WORKING (server list)
-     *   â€¢ https://anikoto-api-6643.onrender.com/api/stream?id=<link_id> â†’ WORKING (stream URL)
-     *
-     */
-    "use strict";    
-function getRuntimeFetch() {
-    const f = globalThis.fetch;
-    if (typeof f !== "function") {
-        throw new Error("SkyStream runtime does not provide fetch in this environment");
-    }
-    return f;
+﻿const API = "https://anikoto-api-6643.onrender.com/api";
+
+async function api(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${path}`);
+  return await r.json();
 }
-    // API Base URL - can be overridden by setting window.API_BASE before plugin loads
-    const API_BASE = (typeof window !== 'undefined' && window.API_BASE) ||
-                     (typeof self !== 'undefined' && self.API_BASE) ||
-                     "https://anikoto-api-6643.onrender.com/api";  // Live AniKotoAPI instance
-    const SITE = "https://anikoto.cz";
 
-    /* ---------- helpers ---------- */
-    async function fetchJSON(url, opts = {}) {
-        try {
-            const res = await runtimeFetch(url, { ...opts, headers: { ...(opts.headers || {}), "Accept": "application/json" } });
-            if (!res.ok) throw new Error("HTTP " + res.status);
-            const text = await res.text();
-            if (!text || text.trim().length < 3) throw new Error("empty response");
-            return JSON.parse(text);
-        } catch (e) {
-            throw e;
-        }
+function arr(x) {
+  if (Array.isArray(x)) return x;
+  if (Array.isArray(x?.results)) return x.results;
+  if (Array.isArray(x?.results?.data)) return x.results.data;
+  if (Array.isArray(x?.data)) return x.data;
+  return [];
+}
+
+function item(x) {
+  if (!x || typeof x !== "object") return null;
+
+  const id =
+    x.id ??
+    x.slug ??
+    x.anime_id ??
+    x.animeId ??
+    x.href ??
+    x.url;
+
+  const title =
+    x.title ??
+    x.name ??
+    x.anime_name ??
+    x.animeName ??
+    x.english ??
+    x.japanese;
+
+  if (!id || !title) return null;
+
+  const poster =
+    x.poster ??
+    x.image ??
+    x.poster_url ??
+    x.image_url ??
+    x.thumbnail ??
+    x.cover;
+
+  return {
+    id: String(id),
+    title: String(title),
+    ...(poster ? { image: String(poster) } : {})
+  };
+}
+
+function mapItems(x) {
+  return arr(x).map(item).filter(Boolean).slice(0, 20);
+}
+
+async function safe(name, path) {
+  try {
+    const data = await api(path);
+    const items = mapItems(data);
+    return items.length ? { name, items } : null;
+  } catch (e) {
+    console.log(`[AniKoto] ${name}: ${e?.message ?? String(e)}`);
+    return null;
+  }
+}
+
+async function getHome(cb) {
+  const sections = [];
+
+  const jobs = [
+    ["Trending", "/trending"],
+    ["Most Popular", "/most-popular?page=1"],
+    ["New Release", "/new-release?page=1"],
+    ["Newly Added", "/newly-added?page=1"],
+    ["Upcoming", "/upcoming"],
+    ["Completed", "/completed"]
+  ];
+
+  for (const [name, path] of jobs) {
+    const section = await safe(name, path);
+    if (section) sections.push(section);
+  }
+
+  if (!sections.length) {
+    cb({
+      success: false,
+      errorCode: "GETHOME_ERROR",
+      message: "AniKoto API returned no usable home sections. Check API connectivity/CORS in SkyStream logs."
+    });
+    return;
+  }
+
+  cb({
+    success: true,
+    data: sections
+  });
+}
+
+async function search(query, cb) {
+  try {
+    const q = encodeURIComponent(query ?? "");
+    const data = await api(`/search?query=${q}`);
+    cb({
+      success: true,
+      data: mapItems(data)
+    });
+  } catch (e) {
+    cb({
+      success: false,
+      errorCode: "SEARCH_ERROR",
+      message: e?.message ?? String(e)
+    });
+  }
+}
+
+async function load(url, cb) {
+  try {
+    const u = new URL(url);
+    const id =
+      u.searchParams.get("id") ||
+      u.searchParams.get("slug");
+
+    if (!id) {
+      cb({
+        success: false,
+        errorCode: "LOAD_ERROR",
+        message: "Missing anime id"
+      });
+      return;
     }
 
-    function normalizePoster(p) {
-        if (!p) return undefined;
-        if (typeof p !== "string") return undefined;
-        const s = p.trim();
-        if (s.length === 0 || s === "?" || s.includes("placeholder")) return undefined;
-        if (s.startsWith("http")) return s;
-        return SITE + (s.startsWith("/") ? "" : "/") + s;
-    }
+    const data = await api(`/info?id=${encodeURIComponent(id)}`);
+    const r = data?.results ?? data?.data ?? data;
 
-    function dedupe(items) {
-        const seen = new Set();
-        return items.filter(it => {
-            const id = it.id || it.url || it.title;
-            if (!id) return true;
-            if (seen.has(id)) return false;
-            seen.add(id);
-            return true;
-        });
-    }
+    cb({
+      success: true,
+      data: {
+        id: String(id),
+        title: String(r?.title ?? r?.name ?? id),
+        description: String(r?.description ?? ""),
+        image: r?.poster ? String(r.poster) : undefined
+      }
+    });
+  } catch (e) {
+    cb({
+      success: false,
+      errorCode: "LOAD_ERROR",
+      message: e?.message ?? String(e)
+    });
+  }
+}
 
-    /* ---------- info parser ---------- */
-    async function fetchInfo(nameOrSlug) {
-        const url = API_BASE + "/info?id=" + encodeURIComponent(nameOrSlug);
-        const response = await fetchJSON(url);
-        // API returns { success: true, results: { ... } }
-        return response && response.results ? response.results : null;
-    }
+async function loadStreams(url, cb) {
+  cb({
+    success: false,
+    errorCode: "STREAMS_UNAVAILABLE",
+    message: "Stream loading is disabled in this diagnostic build."
+  });
+}
 
-    function buildItemFromInfo(data) {
-        if (!data || typeof data !== "object") return null;
-        const poster = normalizePoster(data.poster);
-        const item = new MultimediaItem({
-            title: data.title || "Unknown",
-            url: SITE + "/info?id=" + encodeURIComponent(data.slug || data.title || ""),
-            posterUrl: poster,
-            type: (data.type === "Movie" || data.type === "movie") ? "movie" : (data.type === "TV" || data.type === "tv" ? "series" : "anime"),
-            description: data.synopsis || undefined,
-            year: data.premiered ? parseInt(String(data.premiered).replace(/\D/g,"")) || undefined : undefined,
-            score: typeof data.rating === "number" ? data.rating : (parseFloat(data.rating) || undefined),
-            status: data.status || undefined,
-            duration: data.duration ? parseInt(String(data.duration).replace(/\D/g,"")) || undefined : undefined,
-            syncData: (data.title && data.type) ? { source_id: data.title.toLowerCase().replace(/[^a-z0-9]/g,"_") } : undefined,
-        });
-        if (data.genres && Array.isArray(data.genres)) item.tags = data.genres;
-        // Add episode count if available
-        if (data.episodes && data.episodes !== "?") {
-            const epNum = parseInt(data.episodes);
-            if (!isNaN(epNum) && epNum > 0) {
-                // Create episode list - simplified for now
-                const episodes = [];
-                for (let i = 1; i <= epNum; i++) {
-                    episodes.push({
-                        id: `${data.slug}-episode-${i}`,
-                        number: i,
-                        title: `Episode ${i}`,
-                        url: `${SITE}/watch/${data.slug}?ep=${i}`
-                    });
-                }
-                item.episodes = episodes;
-            }
-        }
-        return item;
-    }
-
-    /* ---------- schedule parser ---------- */
-    async function fetchSchedule(dateStr) {
-        // dateStr format YYYY-MM-DD; if omitted use today-ish
-        const url = API_BASE + "/schedule?time=" + (dateStr || new Date().toISOString().split("T")[0]);
-        const response = await fetchJSON(url);
-        // API returns { success: true, results: [...] }
-        return response && response.results ? response.results : [];
-    }
-
-    function buildItemFromScheduleEntry(e) {
-        if (!e || !e.title) return null;
-        // Schedule entries have title/episode/poster sometimes; poster may be missing on some.
-        return new MultimediaItem({
-            title: e.title,
-            url: SITE + "/info?id=" + encodeURIComponent(typeof e.slug === "string" ? e.slug : String(e.title).toLowerCase().replace(/\s+/g,"-")),
-            posterUrl: normalizePoster(e.poster) || normalizePoster(e.thumbnail),
-            type: "series",
-            description: (typeof e.episode === "string") ? "Airing: " + e.episode : undefined,
-        });
-    }
-
-    /* ---------- getHome ---------- */
-    async function getHome(cb) {
-        try {
-            const data = {};
-
-            // Trending
-            try {
-                const trendingResponse = await fetchJSON(API_BASE + "/trending");
-                const trendingItems = trendingResponse && trendingResponse.results ? trendingResponse.results : [];
-                const trending = Array.isArray(trendingItems)
-                    ? trendingItems.map(anime => {
-                        return new MultimediaItem({
-                            title: anime.title || "Unknown",
-                            url: SITE + "/info?id=" + encodeURIComponent(anime.slug || ""),
-                            posterUrl: normalizePoster(anime.poster || ""),
-                            type: (anime.type === "Movie" || anime.type === "movie") ? "movie" : (anime.type === "TV" || anime.type === "tv" ? "series" : "anime"),
-                            description: anime.synopsis || undefined,
-                            year: anime.premiered ? parseInt(String(anime.premiered).replace(/\D/g,"")) || undefined : undefined,
-                            score: typeof anime.rating === "number" ? anime.rating : (parseFloat(anime.rating) || undefined),
-                            status: anime.status || undefined,
-                            duration: anime.duration ? parseInt(String(anime.duration).replace(/\D/g,"")) || undefined : undefined,
-                            syncData: anime.slug ? { source_id: anime.slug } : undefined,
-                        });
-                    })
-                    .filter(Boolean)
-                    .slice(0, 10)
-                    : [];
-                if (trending.length) data["Trending"] = trending;
-            } catch (_) {}
-
-            // Popular / Most Popular
-            try {
-                const popularResponse = await fetchJSON(API_BASE + "/most-popular?page=1");
-                const popularItems = popularResponse && popularResponse.results ? (Array.isArray(popularResponse.results) ? popularResponse.results : (Array.isArray(popularResponse.results.data) ? popularResponse.results.data : [])) : [];
-                const popular = Array.isArray(popularItems)
-                    ? popularItems.map(anime => {
-                        return new MultimediaItem({
-                            title: anime.title || "Unknown",
-                            url: SITE + "/info?id=" + encodeURIComponent(anime.slug || ""),
-                            posterUrl: normalizePoster(anime.poster || ""),
-                            type: (anime.type === "Movie" || anime.type === "movie") ? "movie" : (anime.type === "TV" || anime.type === "tv" ? "series" : "anime"),
-                            description: anime.synopsis || undefined,
-                            year: anime.premiered ? parseInt(String(anime.premiered).replace(/\D/g,"")) || undefined : undefined,
-                            score: typeof anime.rating === "number" ? anime.rating : (parseFloat(anime.rating) || undefined),
-                            status: anime.status || undefined,
-                            duration: anime.duration ? parseInt(String(anime.duration).replace(/\D/g,"")) || undefined : undefined,
-                            syncData: anime.slug ? { source_id: anime.slug } : undefined,
-                        });
-                    })
-                    .filter(Boolean)
-                    .slice(0, 10)
-                    : [];
-                if (popular.length) data["Popular"] = popular;
-            } catch (_) {}
-
-            // New Releases
-            try {
-                const newReleaseResponse = await fetchJSON(API_BASE + "/new-release?page=1");
-                const newReleaseItems = newReleaseResponse && newReleaseResponse.results ? (Array.isArray(newReleaseResponse.results) ? newReleaseResponse.results : (Array.isArray(newReleaseResponse.results.data) ? newReleaseResponse.results.data : [])) : [];
-                const newReleases = Array.isArray(newReleaseItems)
-                    ? newReleaseItems.map(anime => {
-                        return new MultimediaItem({
-                            title: anime.title || "Unknown",
-                            url: SITE + "/info?id=" + encodeURIComponent(anime.slug || ""),
-                            posterUrl: normalizePoster(anime.poster || ""),
-                            type: (anime.type === "Movie" || anime.type === "movie") ? "movie" : (anime.type === "TV" || anime.type === "tv" ? "series" : "anime"),
-                            description: anime.synopsis || undefined,
-                            year: anime.premiered ? parseInt(String(anime.premiered).replace(/\D/g,"")) || undefined : undefined,
-                            score: typeof anime.rating === "number" ? anime.rating : (parseFloat(anime.rating) || undefined),
-                            status: anime.status || undefined,
-                            duration: anime.duration ? parseInt(String(anime.duration).replace(/\D/g,"")) || undefined : undefined,
-                            syncData: anime.slug ? { source_id: anime.slug } : undefined,
-                        });
-                    })
-                    .filter(Boolean)
-                    .slice(0, 10)
-                    : [];
-                if (newReleases.length) data["New Releases"] = newReleases;
-            } catch (_) {}
-
-            // Recently Updated / Recently Added
-            try {
-                const recentlyAddedResponse = await fetchJSON(API_BASE + "/newly-added?page=1");
-                const recentlyAddedItems = recentlyAddedResponse && recentlyAddedResponse.results ? (Array.isArray(recentlyAddedResponse.results) ? recentlyAddedResponse.results : (Array.isArray(recentlyAddedResponse.results.data) ? recentlyAddedResponse.results.data : [])) : [];
-                const recentlyUpdated = Array.isArray(recentlyAddedItems)
-                    ? recentlyAddedItems.map(anime => {
-                        return new MultimediaItem({
-                            title: anime.title || "Unknown",
-                            url: SITE + "/info?id=" + encodeURIComponent(anime.slug || ""),
-                            posterUrl: normalizePoster(anime.poster || ""),
-                            type: (anime.type === "Movie" || anime.type === "movie") ? "movie" : (anime.type === "TV" || anime.type === "tv" ? "series" : "anime"),
-                            description: anime.synopsis || undefined,
-                            year: anime.premiered ? parseInt(String(anime.premiered).replace(/\D/g,"")) || undefined : undefined,
-                            score: typeof anime.rating === "number" ? anime.rating : (parseFloat(anime.rating) || undefined),
-                            status: anime.status || undefined,
-                            duration: anime.duration ? parseInt(String(anime.duration).replace(/\D/g,"")) || undefined : undefined,
-                            syncData: anime.slug ? { source_id: anime.slug } : undefined,
-                        });
-                    })
-                    .filter(Boolean)
-                    .slice(0, 10)
-                    : [];
-                if (recentlyUpdated.length) data["Recently Updated"] = recentlyUpdated;
-            } catch (_) {}
-
-            // Upcoming
-            try {
-                const upcomingResponse = await fetchJSON(API_BASE + "/upcoming");
-                const upcomingItems = upcomingResponse && upcomingResponse.results ? upcomingResponse.results : [];
-                const upcoming = Array.isArray(upcomingItems)
-                    ? upcomingItems.map(anime => {
-                        return new MultimediaItem({
-                            title: anime.title || "Unknown",
-                            url: SITE + "/info?id=" + encodeURIComponent(anime.slug || ""),
-                            posterUrl: normalizePoster(anime.poster || ""),
-                            type: (anime.type === "Movie" || anime.type === "movie") ? "movie" : (anime.type === "TV" || anime.type === "tv" ? "series" : "anime"),
-                            description: anime.synopsis || undefined,
-                            year: anime.premiered ? parseInt(String(anime.premiered).replace(/\D/g,"")) || undefined : undefined,
-                            score: typeof anime.rating === "number" ? anime.rating : (parseFloat(anime.rating) || undefined),
-                            status: anime.status || undefined,
-                            duration: anime.duration ? parseInt(String(anime.duration).replace(/\D/g,"")) || undefined : undefined,
-                            syncData: anime.slug ? { source_id: anime.slug } : undefined,
-                        });
-                    })
-                    .filter(Boolean)
-                    .slice(0, 10)
-                    : [];
-                if (upcoming.length) data["Upcoming"] = upcoming;
-            } catch (_) {}
-
-            // Completed
-            try {
-                const completedResponse = await fetchJSON(API_BASE + "/completed");
-                const completedItems = completedResponse && completedResponse.results ? completedResponse.results : [];
-                const completed = Array.isArray(completedItems)
-                    ? completedItems.map(anime => {
-                        return new MultimediaItem({
-                            title: anime.title || "Unknown",
-                            url: SITE + "/info?id=" + encodeURIComponent(anime.slug || ""),
-                            posterUrl: normalizePoster(anime.poster || ""),
-                            type: (anime.type === "Movie" || anime.type === "movie") ? "movie" : (anime.type === "TV" || anime.type === "tv" ? "series" : "anime"),
-                            description: anime.synopsis || undefined,
-                            year: anime.premiered ? parseInt(String(anime.premiered).replace(/\D/g,"")) || undefined : undefined,
-                            score: typeof anime.rating === "number" ? anime.rating : (parseFloat(anime.rating) || undefined),
-                            status: anime.status || undefined,
-                            duration: anime.duration ? parseInt(String(anime.duration).replace(/\D/g,"")) || undefined : undefined,
-                            syncData: anime.slug ? { source_id: anime.slug } : undefined,
-                        });
-                    })
-                    .filter(Boolean)
-                    .slice(0, 10)
-                    : [];
-                if (completed.length) data["Completed"] = completed;
-            } catch (_) {}
-
-            if (Object.keys(data).length === 0) {
-                return cb({ success: false, errorCode: "GETHOME_ERROR", message: "No home sections could be loaded" });
-            }
-            cb({ success: true, data: data });
-        } catch (e) {
-            cb({ success: false, errorCode: "GETHOME_ERROR", message: String(e) });
-        }
-    }
-
-    /* ---------- search ---------- */
-    async function search(query, cb) {
-        try {
-            if (!query || String(query).trim().length === 0) {
-                return cb({ success: true, data: [] });
-            }
-            // Use the verified API endpoint
-            const url = API_BASE + "/search?keyword=" + encodeURIComponent(query) + "&page=1";
-            const response = await fetchJSON(url);
-            // API returns { success: true, results: { data: [...] } } or sometimes { success: true, results: [...] }
-            let items = [];
-            if (response && response.success) {
-                if (Array.isArray(response.results)) {
-                    items = response.results;
-                } else if (response.results && Array.isArray(response.results.data)) {
-                    items = response.results.data;
-                }
-            }
-            if (items.length === 0) {
-                cb({ success: true, data: [], message: "No results found" });
-            } else {
-                const mapped = items.map(anime => {
-                    return new MultimediaItem({
-                        title: anime.title || "Unknown",
-                        url: SITE + "/info?id=" + encodeURIComponent(anime.slug || ""),
-                        posterUrl: normalizePoster(anime.poster || ""),
-                        type: (anime.type === "Movie" || anime.type === "movie") ? "movie" : (anime.type === "TV" || anime.type === "tv" ? "series" : "anime"),
-                        description: anime.synopsis || undefined,
-                        year: anime.premiered ? parseInt(String(anime.premiered).replace(/\D/g,"")) || undefined : undefined,
-                        score: typeof anime.rating === "number" ? anime.rating : (parseFloat(anime.rating) || undefined),
-                        status: anime.status || undefined,
-                        duration: anime.duration ? parseInt(String(anime.duration).replace(/\D/g,"")) || undefined : undefined,
-                        syncData: anime.slug ? { source_id: anime.slug } : undefined,
-                    });
-                });
-                cb({ success: true, data: mapped });
-            }
-        } catch (e) {
-            cb({ success: false, errorCode: "SEARCH_ERROR", message: String(e) });
-        }
-    }
-
-    /* ---------- load ---------- */
-    async function load(url, cb) {
-        try {
-            // url comes from item.url = SITE + /info?id=<slug>
-            let slug = url;
-            try {
-                const u = new URL(url);
-                const q = u.searchParams.get("id");
-                if (q) {
-                    // Extract only the anime slug (first part before any "/")
-                    slug = q.split("/")[0];
-                }
-            } catch (_) {}
-            // Try direct info fetch using the API endpoint
-            let data;
-            try {
-                data = await fetchInfo(slug);
-            } catch (e1) {
-                return cb({ success: false, errorCode: "LOAD_ERROR", message: "Anikoto info endpoint unavailable for: " + slug });
-            }
-            if (!data || !data.title) {
-                return cb({ success: false, errorCode: "LOAD_NOT_FOUND", message: "No info returned for: " + slug });
-            }
-
-            const item = buildItemFromInfo(data);
-            if (!item) return cb({ success: false, errorCode: "LOAD_PARSE_ERROR", message: "Failed to parse info" });
-
-            // Episodes: if the API provided episode count, build episodes array
-            if (data.episodes && data.episodes !== "?") {
-                const epNum = parseInt(data.episodes);
-                if (!isNaN(epNum) && epNum > 0) {
-                    const episodes = [];
-                    for (let i = 1; i <= epNum; i++) {
-                        episodes.push({
-                            id: `${data.slug}-episode-${i}`,
-                            number: i,
-                            title: `Episode ${i}`,
-                            url: `${SITE}/watch/${data.slug}?ep=${i}`
-                        });
-                    }
-                    item.episodes = episodes;
-                }
-            } else if (data.episodes === "?") {
-                // For specials/movies with unknown episode count, treat as 1 episode
-                item.episodes = [{
-                    id: `${data.slug}-episode-1`,
-                    number: 1,
-                    title: `Episode 1`,
-                    url: `${SITE}/watch/${data.slug}?ep=1`
-                }];
-            } else {
-                item.episodes = [];
-            }
-
-            cb({ success: true, data: item });
-        } catch (e) {
-            cb({ success: false, errorCode: "LOAD_ERROR", message: String(e) });
-        }
-    }
-
-    /* ---------- loadStreams ---------- */
-    async function loadStreams(url, cb) {
-        try {
-            // Extract link ID from URL - it comes from item.url = SITE + /watch/<slug>?ep=<episode>
-            // But we need to get the episode ID from the item data passed in url parameter
-            // Actually, url parameter in loadStreams is the item.url we built in load()
-            // Let's parse it to get slug and episode number
-            let slug = "";
-            let episodeNum = 1;
-
-            try {
-                const u = new URL(url);
-                const pathParts = u.pathname.split("/");
-                // Path is like /watch/<slug>
-                if (pathParts.length >= 3 && pathParts[1] === "watch") {
-                    slug = pathParts[2];
-                    // Decode the slug and extract anime slug (part before first "/")
-                    const decodedSlug = decodeURIComponent(slug);
-                    const animeSlugPart = decodedSlug.split("/")[0];
-                    // Re-encode for API call
-                    slug = encodeURIComponent(animeSlugPart);
-                }
-                // Get episode from query param
-                const epParam = u.searchParams.get("ep");
-                if (epParam) {
-                    episodeNum = parseInt(epParam);
-                }
-            } catch (_) {
-                // Fallback: try to extract from string
-                const match = url.match(/\/watch\/([^/?]+)(?:[?&]ep=(\d+))?/);
-                if (match) {
-                    slug = match[1];
-                    // Decode the slug and extract anime slug (part before first "/")
-                    const decodedSlug = decodeURIComponent(slug);
-                    const animeSlugPart = decodedSlug.split("/")[0];
-                    // Re-encode for API call
-                    slug = encodeURIComponent(animeSlugPart);
-                    if (match[2]) episodeNum = parseInt(match[2]);
-                }
-            }
-
-            if (!slug) {
-                return cb({ success: false, errorCode: "STREAM_ERROR", message: "Could not extract anime slug from URL" });
-            }
-
-            // First, get episode list to find the link ID for this episode
-            const episodesResponse = await fetchJSON(API_BASE + "/episodes/" + encodeURIComponent(slug));
-            if (!episodesResponse || !episodesResponse.success) {
-                return cb({ success: false, errorCode: "STREAM_ERROR", message: "Failed to fetch episode list" });
-            }
-            const episodes = episodesResponse.results && episodesResponse.results.episodes;
-            if (!Array.isArray(episodes)) {
-                return cb({ success: false, errorCode: "STREAM_ERROR", message: "Failed to fetch episode list" });
-            }
-
-            const episode = episodes.find(ep => ep.episode_no === episodeNum);
-            if (!episode) {
-                return cb({ success: false, errorCode: "STREAM_ERROR", message: `Episode ${episodeNum} not found` });
-            }
-
-            // Get server IDs from episode, then fetch servers to get link ID
-            if (!episode.server_ids) {
-                return cb({ success: false, errorCode: "STREAM_ERROR", message: "Episode missing server IDs" });
-            }
-
-            const serversResponse = await fetchJSON(API_BASE + "/servers?ids=" + encodeURIComponent(episode.server_ids));
-            if (!serversResponse || !serversResponse.success || !serversResponse.results) {
-                return cb({ success: false, errorCode: "STREAM_ERROR", message: "Failed to fetch server list" });
-            }
-
-            const servers = serversResponse.results;
-            if (!Array.isArray(servers) || servers.length === 0) {
-                return cb({ success: false, errorCode: "STREAM_ERROR", message: "No servers found" });
-            }
-
-            // Try each server and collect all working streams
-            const streamResults = [];
-            let lastError = null;
-
-            for (const server of servers) {
-                if (!server || !server.link_id) {
-                    continue;
-                }
-
-                try {
-                    const streamResponse = await fetchJSON(API_BASE + "/stream?id=" + encodeURIComponent(server.link_id));
-                    if (!streamResponse || !streamResponse.success || !streamResponse.results) {
-                        lastError = new Error("Failed to fetch stream info");
-                        continue;
-                    }
-
-                    const streamData = streamResponse.results;
-                    if (!streamData.url) {
-                        lastError = new Error("No stream URL available");
-                        continue;
-                    }
-
-                    // Build StreamResult according to SkyStream specification
-                    const streamResult = new StreamResult({
-                        url: streamData.url,
-                        headers: streamData.headers || {}, // Preserve headers when supplied
-                        // Optional: add quality if available
-                        ...(streamData.type ? { quality: streamData.type.toUpperCase() } : {}),
-                        // Optional: add skip data for intros/outros
-                        ...(streamData.skipData ? {
-                            intro: {
-                                start: streamData.skipData.intro_start || 0,
-                                end: streamData.skipData.intro_end || 0
-                            },
-                            outro: {
-                                start: streamData.skipData.outro_start || 0,
-                                end: streamData.skipData.outro_end || 0
-                            }
-                        } : {})
-                    });
-
-                    streamResults.push(streamResult);
-                } catch (error) {
-                    lastError = error;
-                    continue; // Try next server
-                }
-            }
-
-            if (streamResults.length === 0) {
-                return cb({ success: false, errorCode: "STREAM_ERROR", message: lastError ? lastError.message : "No working streams found" });
-            }
-
-            cb({ success: true, data: streamResults });
-        } catch (e) {
-            cb({ success: false, errorCode: "STREAM_ERROR", message: String(e) });
-        }
-    }
-
-    globalThis.getHome = getHome;
-    globalThis.search = search;
-    globalThis.load = load;
-    globalThis.loadStreams = loadStreams;
-})();
-
-
-
-
-
+module.exports = {
+  getHome,
+  search,
+  load,
+  loadStreams
+};
