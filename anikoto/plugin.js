@@ -1,73 +1,74 @@
 ﻿const API = "https://anikoto-api-6643.onrender.com/api";
 
 async function api(path) {
-  const r = await fetch(API + path);
-  if (!r.ok) throw new Error(`HTTP ${r.status} ${path}`);
-  return await r.json();
+  const response = await http_get(API + path, {});
+
+  if (!response || response.status < 200 || response.status >= 300) {
+    throw new Error(`HTTP ${response?.status ?? "unknown"} ${path}`);
+  }
+
+  try {
+    return JSON.parse(response.body);
+  } catch {
+    throw new Error(`Invalid JSON from ${path}`);
+  }
 }
 
-function arr(x) {
-  if (Array.isArray(x)) return x;
-  if (Array.isArray(x?.results)) return x.results;
-  if (Array.isArray(x?.results?.data)) return x.results.data;
-  if (Array.isArray(x?.data)) return x.data;
+function arr(value) {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.results)) return value.results;
+  if (Array.isArray(value?.results?.data)) return value.results.data;
+  if (Array.isArray(value?.data)) return value.data;
   return [];
 }
 
-function item(x) {
-  if (!x || typeof x !== "object") return null;
+function normalize(item) {
+  if (!item || typeof item !== "object") return null;
 
   const id =
-    x.id ??
-    x.slug ??
-    x.anime_id ??
-    x.animeId ??
-    x.href ??
-    x.url;
+    item.id ??
+    item.slug ??
+    item.anime_id ??
+    item.animeId ??
+    item.href ??
+    item.url;
 
   const title =
-    x.title ??
-    x.name ??
-    x.anime_name ??
-    x.animeName ??
-    x.english ??
-    x.japanese;
+    item.title ??
+    item.name ??
+    item.anime_name ??
+    item.animeName ??
+    item.english ??
+    item.japanese;
 
   if (!id || !title) return null;
 
   const poster =
-    x.poster ??
-    x.image ??
-    x.poster_url ??
-    x.image_url ??
-    x.thumbnail ??
-    x.cover;
+    item.poster ??
+    item.image ??
+    item.poster_url ??
+    item.image_url ??
+    item.thumbnail ??
+    item.cover;
+
+  const slug = String(id);
 
   return {
-    id: String(id),
     title: String(title),
-    ...(poster ? { image: String(poster) } : {})
+    url: `https://anikoto.cz/info?id=${encodeURIComponent(slug)}`,
+    posterUrl: poster ? String(poster) : "",
+    type: "anime"
   };
 }
 
-function mapItems(x) {
-  return arr(x).map(item).filter(Boolean).slice(0, 20);
-}
-
-async function safe(name, path) {
-  try {
-    const data = await api(path);
-    const items = mapItems(data);
-    return items.length ? { name, items } : null;
-  } catch (e) {
-    console.log(`[AniKoto] ${name}: ${e?.message ?? String(e)}`);
-    return null;
-  }
+function mapItems(value) {
+  return arr(value)
+    .map(normalize)
+    .filter(Boolean)
+    .slice(0, 20);
 }
 
 async function getHome(cb) {
-  const sections = [];
-
   const jobs = [
     ["Trending", "/trending"],
     ["Most Popular", "/most-popular?page=1"],
@@ -77,16 +78,29 @@ async function getHome(cb) {
     ["Completed", "/completed"]
   ];
 
+  const sections = [];
+
   for (const [name, path] of jobs) {
-    const section = await safe(name, path);
-    if (section) sections.push(section);
+    try {
+      const data = await api(path);
+      const items = mapItems(data);
+
+      if (items.length) {
+        sections.push({
+          title: name,
+          items
+        });
+      }
+    } catch (e) {
+      console.log(`[AniKoto] ${name}: ${e?.message ?? String(e)}`);
+    }
   }
 
   if (!sections.length) {
     cb({
       success: false,
       errorCode: "GETHOME_ERROR",
-      message: "AniKoto API returned no usable home sections. Check API connectivity/CORS in SkyStream logs."
+      message: "AniKoto API returned no usable home sections."
     });
     return;
   }
@@ -99,8 +113,8 @@ async function getHome(cb) {
 
 async function search(query, cb) {
   try {
-    const q = encodeURIComponent(query ?? "");
-    const data = await api(`/search?query=${q}`);
+    const data = await api(`/search?keyword=${encodeURIComponent(query ?? "")}&page=1`);
+
     cb({
       success: true,
       data: mapItems(data)
@@ -116,30 +130,47 @@ async function search(query, cb) {
 
 async function load(url, cb) {
   try {
-    const u = new URL(url);
+    const parsed = new URL(url);
+
     const id =
-      u.searchParams.get("id") ||
-      u.searchParams.get("slug");
+      parsed.searchParams.get("id") ??
+      parsed.searchParams.get("slug");
 
     if (!id) {
       cb({
         success: false,
         errorCode: "LOAD_ERROR",
-        message: "Missing anime id"
+        message: "Missing anime id."
       });
       return;
     }
 
     const data = await api(`/info?id=${encodeURIComponent(id)}`);
-    const r = data?.results ?? data?.data ?? data;
+    const result = data?.results ?? data?.data ?? data;
+
+    const title =
+      result?.title ??
+      result?.name ??
+      id;
+
+    const description =
+      result?.description ??
+      "";
+
+    const poster =
+      result?.poster ??
+      result?.image ??
+      result?.poster_url ??
+      "";
 
     cb({
       success: true,
       data: {
-        id: String(id),
-        title: String(r?.title ?? r?.name ?? id),
-        description: String(r?.description ?? ""),
-        image: r?.poster ? String(r.poster) : undefined
+        title: String(title),
+        url: String(url),
+        description: String(description),
+        posterUrl: poster ? String(poster) : "",
+        type: "anime"
       }
     });
   } catch (e) {
@@ -155,7 +186,7 @@ async function loadStreams(url, cb) {
   cb({
     success: false,
     errorCode: "STREAMS_UNAVAILABLE",
-    message: "Stream loading is disabled in this diagnostic build."
+    message: "Stream loading is disabled while the catalog integration is being validated."
   });
 }
 
@@ -165,3 +196,5 @@ module.exports = {
   load,
   loadStreams
 };
+
+
