@@ -183,11 +183,143 @@ async function load(url, cb) {
 }
 
 async function loadStreams(url, cb) {
-  cb({
-    success: false,
-    errorCode: "STREAMS_UNAVAILABLE",
-    message: "Stream loading is disabled while the catalog integration is being validated."
-  });
+  try {
+    // Extract anime slug and episode number from the URL
+    let animeSlug = "";
+    let episodeNum = 1;
+    try {
+      const u = new URL(url);
+      if (u.pathname.startsWith("/watch/")) {
+        const pathParts = u.pathname.split("/");
+        if (pathParts.length >= 3) {
+          animeSlug = pathParts[2]; // because /watch/<slug>/...? but note: the bundled code does: u.pathname.split("/") -> ["", "watch", slug, ...]
+          // Then they take the first segment of the slug (in case there are slashes in the slug?) and decode it?
+          // Actually, they do: let v=decodeURIComponent(t).split("/")[0]; t=encodeURIComponent(v)
+          // This is to handle if the slug has slashes? But note: the slug in the URL is the anime id, which should not have slashes.
+          // However, the bundled code does:
+          //   let v=decodeURIComponent(t).split("/")[0];
+          //   t=encodeURIComponent(v);
+          // So we do the same.
+          const slugPart = decodeURIComponent(animeSlug).split("/")[0];
+          animeSlug = encodeURIComponent(slugPart);
+        }
+      }
+      const ep = u.searchParams.get("ep");
+      if (ep) {
+        episodeNum = parseInt(ep);
+      }
+    } catch (e) {
+      // Fallback to regex
+      const match = url.match(/\/watch\/([^/?]+)(?:[?&]ep=(\d+))?/);
+      if (match) {
+        animeSlug = encodeURIComponent(decodeURIComponent(match[1]).split("/")[0]);
+        if (match[2]) {
+          episodeNum = parseInt(match[2]);
+        }
+      } else {
+        throw new Error("Could not extract anime slug from URL");
+      }
+    }
+
+    if (!animeSlug) {
+      throw new Error("Could not extract anime slug from URL");
+    }
+
+    // Fetch episode list for the anime
+    const episodeListResponse = await api(`/episodes/${encodeURIComponent(animeSlug)}`);
+    if (!episodeListResponse || !episodeListResponse.success) {
+      throw new Error("Failed to fetch episode list");
+    }
+
+    const episodes = episodeListResponse.results && episodeListResponse.results.episodes;
+    if (!Array.isArray(episodes)) {
+      throw new Error("Failed to fetch episode list");
+    }
+
+    // Find the episode by episode number
+    const episodeInfo = episodes.find(ep => ep.episode_no === episodeNum);
+    if (!episodeInfo) {
+      throw new Error(`Episode ${episodeNum} not found`);
+    }
+
+    if (!episodeInfo.server_ids) {
+      throw new Error("Episode missing server IDs");
+    }
+
+    // Fetch server list for the episode
+    const serverListResponse = await api(`/servers?ids=${encodeURIComponent(episodeInfo.server_ids)}`);
+    if (!serverListResponse || !serverListResponse.success || !serverListResponse.results) {
+      throw new Error("Failed to fetch server list");
+    }
+
+    const servers = serverListResponse.results;
+    if (!Array.isArray(servers) || servers.length === 0) {
+      throw new Error("No servers found");
+    }
+
+    const streams = [];
+    let lastError = null;
+
+    for (const server of servers) {
+      if (!server || !server.link_id) {
+        continue;
+      }
+      try {
+        const streamResponse = await api(`/stream?id=${encodeURIComponent(server.link_id)}`);
+        if (!streamResponse || !streamResponse.success || !streamResponse.results) {
+          lastError = new Error("Failed to fetch stream info");
+          continue;
+        }
+
+        const streamData = streamResponse.results;
+        if (!streamData.url) {
+          lastError = new Error("No stream URL available");
+          continue;
+        }
+
+        // Build the stream object
+        const streamObj = {
+          url: streamData.url,
+          headers: streamData.headers || {}
+        };
+
+        if (streamData.type) {
+          streamObj.quality = streamData.type.toUpperCase();
+        }
+
+        if (streamData.skipData) {
+          streamObj.intro = {
+            start: streamData.skipData.intro_start || 0,
+            end: streamData.skipData.intro_end || 0
+          };
+          streamObj.outro = {
+            start: streamData.skipData.outro_start || 0,
+            end: streamData.skipData.outro_end || 0
+          };
+        }
+
+        streams.push(streamObj);
+      } catch (e) {
+        lastError = e;
+        continue;
+      }
+    }
+
+    if (streams.length === 0) {
+      throw lastError || new Error("No working streams found");
+    }
+
+    cb({
+      success: true,
+      data: streams
+    });
+  } catch (e) {
+    cb({
+      success: false,
+      errorCode: "STREAM_ERROR",
+      message: e.message || String(e)
+    });
+  }
 }
 
 module.exports = {
