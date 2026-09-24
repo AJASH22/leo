@@ -14,23 +14,23 @@ async function getHome(cb) {
     const res = await http_get(BASE + "/api/v1/home", { Accept: "application/json" });
     if (!res || res.status !== 200) throw new Error("failed to fetch home");
     const data = JSON.parse(res.body || res);
-    const sections = [];
+    const result = {};
     const mapSection = (key, title) => {
       const items = data[key] || [];
       if (items && items.length) {
-        sections.push({ title, items: items.map(it => ({
+        result[title] = items.map(it => ({
           title: it.title?.english ?? it.title?.native ?? it.anime_id,
           url: BASE + "/anime/" + it.anime_id,
           posterUrl: it.cover_image?.large || it.cover_image?.medium || it.cover_image?.small || ""
-        })) });
+        }));
       }
     };
     mapSection("latest_aired", "Latest Airing");
     mapSection("new_on_site", "New on Site");
     mapSection("trending", "Trending");
     mapSection("upcoming", "Upcoming");
-    if (!sections.length) return cb({ success: false, message: "No home sections" });
-    cb({ success: true, data: sections });
+    if (Object.keys(result).length === 0) return cb({ success: false, message: "No home sections" });
+    cb({ success: true, data: result });
   } catch (e) {
     cb({ success: false, errorCode: "GETHOME_ERROR", message: e.message });
   }
