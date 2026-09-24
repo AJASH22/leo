@@ -93,7 +93,15 @@ async function loadStreams(url, cb) {
       subtitles: [],
       source: "Flixcloud"
     }));
-    cb({ success: true, data: streams });
+    // deduplicate by unique url+quality
+    const seen = new Set();
+    const uniqueStreams = streams.filter(s => {
+      const key = s.url + "|" + s.quality;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    cb({ success: true, data: uniqueStreams });
   } catch (e) {
     cb({ success: false, errorCode: "STREAM_ERROR", message: e.message });
   }
