@@ -1,0 +1,10 @@
+{
+  "packageName": "com.ajash.reanime",
+  "name": "ReAnime",
+  "version": 1,
+  "baseUrl": "https://reanime.to",
+  "description": "ReAnime SkyStream plugin – direct scraper based on ReAnime API.",
+  "authors": ["ajash"],
+  "languages": ["en"],
+  "categories": ["Anime", "Streaming"]
+}
