@@ -1,191 +1,218 @@
-(function() {
-    /**
-     * @typedef {Object} Response
-     * @property {boolean} success
-     * @property {any} [data]
-     * @property {string} [errorCode]
-     * @property {string} [message]
-     */
+(function () {
+    const BASE = "https://www.movy.sx";
 
-    /**
-     * @type {import('@skystream/sdk').Manifest}
-     */
-    // var manifest is injected at runtime
-
-    /**
-     * Loads the home screen categories.
-     * @param {(res: Response) => void} cb 
-     */
-    async function getHome(cb) {
-        // Example: Using solveCaptcha if needed (await solveCaptcha(siteKey, url))
+    function absolute(path) {
+        if (!path) return "";
         try {
-            // Dashboard Layout:
-            // - "Trending" is a reserved category promoted to the Hero Carousel.
-            // - Other categories appear as horizontal thumbnail rows.
-            // - If "Trending" is missing, the first category is used for the carousel.
-            cb({ 
-                success: true, 
-                data: { 
-                    "Trending": [
-                        new MultimediaItem({ 
-                            title: "Example Movie (Carousel)", 
-                            url: `${manifest.baseUrl}/movie`, 
-                            posterUrl: `https://placehold.co/400x600.png?text=Trending+Movie`, 
-                            type: "movie", // Valid types: movie, series, anime, livestream, other
-                            bannerUrl: `https://placehold.co/1280x720.png?text=Trending+Banner`, // (optional)
-                            description: "Plot summary here...", // (optional)
-                            headers: { "Referer": `${manifest.baseUrl}` } // (optional)
-                        })
-                    ],
-                    "Latest Series": [
-                        new MultimediaItem({ 
-                            title: "Example Series (Thumb)", 
-                            url: `${manifest.baseUrl}/series`, 
-                            posterUrl: `https://placehold.co/400x600.png?text=Series+Poster`, 
-                            type: "series",
-                            description: "This category appears as a thumbnail row."
-                        })
-                    ]
-                } 
-            });
-        } catch (e) {
-            cb({ success: false, errorCode: "PARSE_ERROR", message: e.stack });
+            return new URL(path, BASE).href;
+        } catch (_) {
+            return "";
         }
     }
 
-    /**
-     * Searches for media items.
-     * @param {string} query
-     * @param {(res: Response) => void} cb 
-     */
+    async function getPageData(url) {
+        const response = await http_get(url, {
+            Accept: "text/html",
+            "User-Agent": "Mozilla/5.0"
+        });
+
+        if (!response || response.status !== 200) {
+            throw new Error(
+                "Movy returned HTTP " + (response?.status ?? "no response")
+            );
+        }
+
+        const html = response.body || response;
+        const match = String(html).match(
+            /<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i
+        );
+
+        if (!match) {
+            throw new Error("Movy page did not contain its public catalog data");
+        }
+
+        return JSON.parse(match[1]);
+    }
+
+    function collectItems(data) {
+        const props = data?.props?.pageProps || {};
+        const sections = {};
+
+        function addSection(name, items) {
+            if (!Array.isArray(items)) return;
+
+            const mapped = items
+                .filter(item => item && item.title && item.slug)
+                .map(item => ({
+                    raw: item,
+                    title: item.title,
+                    url: absolute(item.slug),
+                    posterUrl: absolute(item.poster || item.image),
+                    bannerUrl: absolute(item.image || item.background),
+                    description: item.description || "",
+                    type: item.mediaType === "tv" ? "series" : "movie",
+                    year: Number.parseInt(
+                        String(item.release_date || "").slice(0, 4), 10
+                    ) || undefined,
+                    score: Number(item.rating) || undefined
+                }));
+
+            if (mapped.length) sections[name] = mapped;
+        }
+
+        for (const section of props.trendingSections || []) {
+            addSection(section.name || "Trending", section.movies);
+        }
+
+        for (const section of props.defaultSections || []) {
+            addSection(section.name || "Featured", section.movies);
+        }
+
+        for (const section of props.streamingSections || []) {
+            addSection(section.name || "Streaming", section.movies);
+        }
+
+        addSection("Upcoming TV", props.upcomingTv);
+        addSection("Recent 4K", props.recent4k);
+
+        return sections;
+    }
+
+    function toItem(item) {
+        return new MultimediaItem({
+            title: item.title,
+            url: item.url,
+            posterUrl: item.posterUrl,
+            bannerUrl: item.bannerUrl,
+            type: item.type,
+            description: item.description,
+            year: item.year,
+            score: item.score,
+            headers: { Referer: BASE }
+        });
+    }
+
+    async function getHome(cb) {
+        try {
+            const data = await getPageData(BASE + "/");
+            const sections = collectItems(data);
+            const result = {};
+
+            for (const [name, items] of Object.entries(sections)) {
+                result[name] = items.map(toItem);
+            }
+
+            if (!Object.keys(result).length) {
+                throw new Error("No catalog sections were found on Movy's homepage");
+            }
+
+            cb({ success: true, data: result });
+        } catch (e) {
+            cb({
+                success: false,
+                errorCode: "PARSE_ERROR",
+                message: String(e?.message || e)
+            });
+        }
+    }
+
     async function search(query, cb) {
         try {
-            // Standard: Return a List of items
-            // Samples show both a movie and a series
-            cb({ 
-                success: true, 
-                data: [
-                        new MultimediaItem({ 
-                            title: "Example Movie (Search Result)", 
-                            url: `${manifest.baseUrl}/movie`, 
-                            posterUrl: `https://placehold.co/400x600.png?text=Search+Movie`, 
-                            type: "movie", 
-                            bannerUrl: `https://placehold.co/1280x720.png?text=Search+Banner`,
-                            description: "Plot summary here...", 
-                            headers: { "Referer": `${manifest.baseUrl}` } 
-                        }),
-                        new MultimediaItem({ 
-                            title: "Example Series (Search Result)", 
-                            url: `${manifest.baseUrl}/series`, 
-                            posterUrl: `https://placehold.co/400x600.png?text=Search+Series`, 
-                            type: "series", 
-                            description: "A series found in search.", 
-                            headers: { "Referer": `${manifest.baseUrl}` } 
-                        })
-                ] 
-            });
+            const term = String(query || "").trim().toLocaleLowerCase();
+
+            if (!term) {
+                cb({ success: true, data: [] });
+                return;
+            }
+
+            const data = await getPageData(BASE + "/");
+            const sections = collectItems(data);
+            const unique = new Map();
+
+            for (const items of Object.values(sections)) {
+                for (const item of items) {
+                    if (item.title.toLocaleLowerCase().includes(term)) {
+                        unique.set(item.url, item);
+                    }
+                }
+            }
+
+            cb({ success: true, data: [...unique.values()].map(toItem) });
         } catch (e) {
-            cb({ success: false, errorCode: "SEARCH_ERROR", message: e.stack });
+            cb({
+                success: false,
+                errorCode: "SEARCH_ERROR",
+                message: String(e?.message || e)
+            });
         }
     }
 
-    /**
-     * Loads details for a specific media item.
-     * @param {string} url
-     * @param {(res: Response) => void} cb 
-     */
     async function load(url, cb) {
         try {
-            // Standard: Return a single item with full metadata
-            // Sample shows a series with episodes
-            cb({ 
-                success: true, 
-                data: new MultimediaItem({
-                    title: "Example Series Full Details",
-                    url: url,
-                    posterUrl: `https://placehold.co/400x600.png?text=Series+Details`,
-                    type: "series", 
-                    bannerUrl: `https://placehold.co/1280x720.png?text=Series+Banner`,
-                    description: "This is a detailed description of the media.", 
-                    year: 2024,
-                    score: 8.5,
-                    duration: 120, // (optional, in minutes)
-                    status: "ongoing", // ongoing, completed, upcoming
-                    contentRating: "PG-13",
-                    logoUrl: `https://placehold.co/200x100.png?text=Logo`,
-                    isAdult: false,
-                    tags: ["Action", "Adventure"],
-                    cast: [
-                        new Actor({ name: "John Doe", role: "Protagonist", image: "https://placehold.co/200x300.png" })
-                    ],
-                    trailers: [
-                        new Trailer({ name: "Official Trailer", url: "https://www.youtube.com/watch?v=..." })
-                    ],
-                    nextAiring: new NextAiring({ episode: 5, season: 1, airDate: "2024-04-01" }),
-                    recommendations: [
-                        new MultimediaItem({ title: "Similar Show", url: `${manifest.baseUrl}/similar`, posterUrl: "https://placehold.co/400x600", type: "series" })
-                    ],
-                    playbackPolicy: "none", // 'none' | 'VPN Recommended' | 'torrent' | 'externalPlayerOnly' | 'internalPlayerOnly'
-                    syncData: { "my_service_id": "12345" }, // Optional: external metadata sync
-                    streams: [
-                        // Optional: "Instant Load" - bypass loadStreams by providing links here
-                        new StreamResult({ url: "https://example.com/movie.mp4", source: "Instant High" })
-                    ],
-                    headers: { "Referer": `${manifest.baseUrl}` }, 
-                    episodes: [
-                        new Episode({ 
-                            name: "Episode 1", 
-                            url: `${manifest.baseUrl}/watch/1`, 
-                            season: 1, 
-                            episode: 1, 
-                            description: "Episode summary...", 
-                            posterUrl: `https://placehold.co/400x600.png?text=Episode+Poster`,
-                            headers: { "Referer": `${manifest.baseUrl}` },
-                            dubStatus: "sub",
-                            streams: [] // Optional: "Instant Load" for episodes
-                        }),
-                        new Episode({ 
-                            name: "Episode 2", 
-                            url: `${manifest.baseUrl}/watch/2`, 
-                            season: 1, 
-                            episode: 2, 
-                            description: "Next episode summary...", 
-                            posterUrl: `https://placehold.co/400x600.png?text=Episode+Poster`,
-                            headers: { "Referer": `${manifest.baseUrl}` },
-                            dubStatus: "sub"
-                        })
-                    ]
-                })
-            });
+            const target = absolute(url);
+
+            if (!target || !target.startsWith(BASE + "/")) {
+                throw new Error("Invalid Movy catalog URL");
+            }
+
+            const data = await getPageData(target);
+            const sections = collectItems(data);
+            let found = null;
+
+            for (const items of Object.values(sections)) {
+                found = items.find(item => item.url === target);
+                if (found) break;
+            }
+
+            const props = data?.props?.pageProps || {};
+            const candidates = [
+                props.movie,
+                props.show,
+                props.media,
+                props.item,
+                props.details
+            ].filter(Boolean);
+
+            if (!found) {
+                const item = candidates.find(x => x.title || x.name);
+                if (item) {
+                    found = {
+                        title: item.title || item.name,
+                        url: target,
+                        posterUrl: absolute(item.poster || item.image),
+                        bannerUrl: absolute(item.background || item.image),
+                        description: item.description || "",
+                        type: item.mediaType === "tv" || item.type === "tv"
+                            ? "series" : "movie",
+                        year: Number.parseInt(
+                            String(item.release_date || "").slice(0, 4), 10
+                        ) || undefined,
+                        score: Number(item.rating) || undefined
+                    };
+                }
+            }
+
+            if (!found) {
+                throw new Error(
+                    "Movy did not expose matching detail metadata in its public page data"
+                );
+            }
+
+            cb({ success: true, data: toItem(found) });
         } catch (e) {
-            cb({ success: false, errorCode: "LOAD_ERROR", message: e.stack });
+            cb({
+                success: false,
+                errorCode: "LOAD_ERROR",
+                message: String(e?.message || e)
+            });
         }
     }
 
-    /**
-     * Resolves streams for a specific media item or episode.
-     * @param {string} url
-     * @param {(res: Response) => void} cb 
-     */
     async function loadStreams(url, cb) {
-        try {
-            // Standard: Return a List of stream objects
-            cb({ 
-                success: true, 
-                data: [
-                    new StreamResult({ 
-                        url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8", 
-                        source: "Direct Quality", 
-                        headers: { "Referer": `${manifest.baseUrl}` }
-                    })
-                ] 
-            });
-        } catch (e) {
-            cb({ success: false, errorCode: "STREAM_ERROR", message: String(e) });
-        }
+        // Do not return a sample video or invent a playable URL.
+        cb({ success: true, data: [] });
     }
 
-    // Export to global scope for namespaced IIFE capture
     globalThis.getHome = getHome;
     globalThis.search = search;
     globalThis.load = load;
