@@ -1,0 +1,16 @@
+{
+  "packageName": "com.ajashh.skystream.movy",
+  "name": "Movy",
+  "version": 1,
+  "baseUrl": "https://movy.sx",
+  "description": "Movy plugin (Sky Gen 2)",
+  "authors": [
+    "ajashh"
+  ],
+  "languages": [
+    "en"
+  ],
+  "categories": [
+    "Others"
+  ]
+}

@@ -18,6 +18,23 @@
     "url": "https://raw.githubusercontent.com/AJASH22/leo/main/dist/com.anikoto.skystream.sky"
   },
   {
+    "packageName": "com.ajashh.skystream.movy",
+    "name": "Movy",
+    "version": 1,
+    "baseUrl": "https://movy.sx",
+    "description": "Movy plugin (Sky Gen 2)",
+    "authors": [
+      "ajashh"
+    ],
+    "languages": [
+      "en"
+    ],
+    "categories": [
+      "Others"
+    ],
+    "url": "https://raw.githubusercontent.com/AJASH22/leo/main/dist/com.ajashh.skystream.movy.sky"
+  },
+  {
     "packageName": "com.ajash.reanime",
     "name": "ReAnime",
     "version": 1,
